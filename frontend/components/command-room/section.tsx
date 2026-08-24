@@ -111,7 +111,6 @@ export function CommandRoomSection() {
         sizes="100vw"
         className="-z-10 object-cover"
       />
-      <div className="absolute inset-0 -z-10 bg-background/85" aria-hidden />
       <div
         className="absolute inset-x-0 top-0 -z-10 h-40 bg-linear-to-b from-background to-transparent"
         aria-hidden
@@ -127,7 +126,7 @@ export function CommandRoomSection() {
         <h2 className="mt-3 font-heading text-4xl sm:text-5xl">
           The floor is <em className="text-primary">live.</em>
         </h2>
-        <p className="mt-3 max-w-md text-muted-foreground">
+        <p className="mt-3 max-w-md text-foreground/90 [text-shadow:0_1px_8px_rgba(10,15,30,0.9)]">
           Every incident, what the agent is doing about it, and what is
           waiting on you.
         </p>
