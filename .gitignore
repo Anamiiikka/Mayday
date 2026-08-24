@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local design inspiration files (saved web pages)
+Footer.html
+Footer_files/
+Landing Page Image Inspiration.html
+Landing Page Image Inspiration_files/
