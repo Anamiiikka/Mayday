@@ -63,8 +63,8 @@ export default function LandingPage() {
           <Wordmark />
         </div>
 
-        <div className="mt-auto px-6 pb-14 pt-40 sm:px-10 sm:pb-16">
-          <h1 className="max-w-4xl font-heading text-5xl leading-[1.06] sm:text-6xl lg:text-7xl">
+        <div className="mt-auto px-6 pb-10 pt-40 sm:px-10 sm:pb-12">
+          <h1 className="max-w-4xl font-heading text-4xl leading-[1.08] sm:text-5xl lg:text-6xl">
             Production went down.
             <span className="block italic text-primary">Mayday picked up.</span>
           </h1>
@@ -83,8 +83,27 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section id="how" className="border-t border-border">
-        <div className="mx-auto grid w-full max-w-6xl gap-10 px-6 py-16 sm:px-10 md:grid-cols-3">
+      {/* Below the hero, the misty harbor carries the atmosphere. */}
+      <div className="relative isolate">
+        <Image
+          src="/bg.png"
+          alt=""
+          fill
+          sizes="100vw"
+          className="-z-10 object-cover"
+        />
+        <div className="absolute inset-0 -z-10 bg-background/85" aria-hidden />
+        <div
+          className="absolute inset-x-0 top-0 -z-10 h-40 bg-linear-to-b from-background to-transparent"
+          aria-hidden
+        />
+        <div
+          className="absolute inset-x-0 bottom-0 -z-10 h-40 bg-linear-to-t from-background to-transparent"
+          aria-hidden
+        />
+
+        <section id="how">
+          <div className="mx-auto grid w-full max-w-6xl gap-10 px-6 py-16 sm:px-10 md:grid-cols-3">
           {PILLARS.map((pillar) => (
             <div key={pillar.call}>
               <p className="font-mono text-[11px] tracking-[0.3em] text-amber">
@@ -95,28 +114,29 @@ export default function LandingPage() {
                 {pillar.body}
               </p>
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section id="radio" className="border-t border-border">
-        <div className="mx-auto w-full max-w-3xl px-6 py-16 sm:px-10">
-          <p className="text-center font-mono text-xs tracking-[0.3em] text-amber">
-            RADIO TRAFFIC
-          </p>
-          <h2 className="mt-3 text-center font-heading text-4xl sm:text-5xl">
-            Four minutes from alert to{" "}
-            <em className="text-primary">all-clear</em>
-          </h2>
-          <p className="mx-auto mt-3 max-w-lg text-center text-muted-foreground">
-            One response, end to end. The clearance request is the moment a
-            human decides — everything before it is read-only.
-          </p>
-          <div className="mt-10">
-            <Transcript />
+            ))}
           </div>
-        </div>
-      </section>
+        </section>
+
+        <section id="radio">
+          <div className="mx-auto w-full max-w-3xl px-6 pb-20 pt-4 sm:px-10">
+            <p className="text-center font-mono text-xs tracking-[0.3em] text-amber">
+              RADIO TRAFFIC
+            </p>
+            <h2 className="mt-3 text-center font-heading text-4xl sm:text-5xl">
+              Four minutes from alert to{" "}
+              <em className="whitespace-nowrap text-primary">all-clear</em>
+            </h2>
+            <p className="mx-auto mt-3 max-w-lg text-center text-muted-foreground">
+              One response, end to end. The clearance request is the moment a
+              human decides — everything before it is read-only.
+            </p>
+            <div className="mt-10">
+              <Transcript />
+            </div>
+          </div>
+        </section>
+      </div>
 
       {/* Closing band — the operator Mayday reports to. */}
       <section id="watch" className="relative isolate flex min-h-[64svh] items-center">
@@ -157,11 +177,23 @@ export default function LandingPage() {
       </section>
 
       <footer className="border-t border-border bg-background px-6 py-6 sm:px-10">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4">
-          <Wordmark />
-          <p className="font-mono text-[11px] tracking-widest text-muted-foreground">
-            BUILT FOR THE AGENT HARNESS HACKATHON 2026 · SQUAWK 7700
-          </p>
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-10 gap-y-4">
+          <div className="flex items-center gap-3">
+            <Image src="/mark.png" alt="Mayday" width={28} height={28} />
+            <span className="text-sm text-muted-foreground">
+              Answers the call. Asks before it acts.
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-2 font-mono text-[11px] tracking-widest text-muted-foreground">
+            <a
+              href="https://github.com/Anamiiikka/Mayday"
+              className="transition-colors hover:text-amber"
+            >
+              VIEW SOURCE
+            </a>
+            <span>POWERED BY TRUEFORGE</span>
+            <span>© 2026 MAYDAY</span>
+          </div>
         </div>
       </footer>
     </main>
