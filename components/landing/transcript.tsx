@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 type Tone = "alert" | "agent" | "human" | "ok";
 
@@ -73,20 +73,35 @@ const TEXT_COLOR: Record<Tone, string> = {
   ok: "text-phosphor",
 };
 
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function subscribeToReducedMotion(onChange: () => void) {
+  const query = window.matchMedia(REDUCED_MOTION_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+/** null while server-rendered, then the visitor's actual preference. */
+function useReducedMotion(): boolean | null {
+  return useSyncExternalStore(
+    subscribeToReducedMotion,
+    () => window.matchMedia(REDUCED_MOTION_QUERY).matches,
+    () => null,
+  );
+}
+
 /**
  * Types the incident transcript out line by line like live radio traffic.
- * With prefers-reduced-motion, the full transcript renders immediately.
+ * With prefers-reduced-motion, the full transcript renders immediately
+ * (Replay still animates, since that is an explicit request for motion).
  */
 export function Transcript() {
   const [lineIndex, setLineIndex] = useState(0);
   const [charIndex, setCharIndex] = useState(0);
-  const [animate, setAnimate] = useState<boolean | null>(null);
+  const [forceAnimate, setForceAnimate] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setAnimate(!query.matches);
-  }, []);
+  const reducedMotion = useReducedMotion();
+  const animate = forceAnimate || reducedMotion === false;
 
   useEffect(() => {
     if (!animate || lineIndex >= LINES.length) return;
@@ -109,7 +124,7 @@ export function Transcript() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [lineIndex, charIndex]);
 
-  if (animate === null) {
+  if (reducedMotion === null && !forceAnimate) {
     return <TranscriptFrame lines={[]} done={false} onReplay={() => {}} />;
   }
 
@@ -129,7 +144,7 @@ export function Transcript() {
       onReplay={() => {
         setLineIndex(0);
         setCharIndex(0);
-        setAnimate(true);
+        setForceAnimate(true);
       }}
     />
   );
