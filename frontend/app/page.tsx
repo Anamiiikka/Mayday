@@ -1,25 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Transcript } from "@/components/landing/transcript";
 import { Button } from "@/components/ui/button";
-
-const PILLARS = [
-  {
-    call: "RECEIVE",
-    title: "Listens on your telemetry",
-    body: "Pulls metrics, logs, and deploy history through MCP tools that are strictly read-only. Investigation can never change your systems.",
-  },
-  {
-    call: "DIAGNOSE",
-    title: "Runs the numbers in a sandbox",
-    body: "Writes its own diagnostic scripts and executes them in an isolated sandbox — never on your machines, never with your credentials.",
-  },
-  {
-    call: "REQUEST CLEARANCE",
-    title: "Never acts alone",
-    body: "Every restart, rollback, or scale-up pauses at an approval gate. Nothing irreversible happens until an operator clears it.",
-  },
-];
 
 function Wordmark() {
   return (
@@ -83,60 +64,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Below the hero, the misty harbor carries the atmosphere. */}
-      <div className="relative isolate">
-        <Image
-          src="/bg.png"
-          alt=""
-          fill
-          sizes="100vw"
-          className="-z-10 object-cover"
-        />
-        <div className="absolute inset-0 -z-10 bg-background/85" aria-hidden />
-        <div
-          className="absolute inset-x-0 top-0 -z-10 h-40 bg-linear-to-b from-background to-transparent"
-          aria-hidden
-        />
-        <div
-          className="absolute inset-x-0 bottom-0 -z-10 h-40 bg-linear-to-t from-background to-transparent"
-          aria-hidden
-        />
-
-        <section id="how">
-          <div className="mx-auto grid w-full max-w-6xl gap-10 px-6 py-16 sm:px-10 md:grid-cols-3">
-          {PILLARS.map((pillar) => (
-            <div key={pillar.call}>
-              <p className="font-mono text-[11px] tracking-[0.3em] text-amber">
-                {pillar.call}
-              </p>
-              <h2 className="mt-3 font-heading text-2xl">{pillar.title}</h2>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                {pillar.body}
-              </p>
-            </div>
-            ))}
-          </div>
-        </section>
-
-        <section id="radio">
-          <div className="mx-auto w-full max-w-3xl px-6 pb-20 pt-4 sm:px-10">
-            <p className="text-center font-mono text-xs tracking-[0.3em] text-amber">
-              RADIO TRAFFIC
-            </p>
-            <h2 className="mt-3 text-center font-heading text-4xl sm:text-5xl">
-              Four minutes from alert to{" "}
-              <em className="whitespace-nowrap text-primary">all-clear</em>
-            </h2>
-            <p className="mx-auto mt-3 max-w-lg text-center text-muted-foreground">
-              One response, end to end. The clearance request is the moment a
-              human decides — everything before it is read-only.
-            </p>
-            <div className="mt-10">
-              <Transcript />
-            </div>
-          </div>
-        </section>
-      </div>
+      {/* The Command Room lands here next. */}
 
       {/* Closing band — the operator Mayday reports to. */}
       <section id="watch" className="relative isolate flex min-h-[64svh] items-center">
