@@ -165,14 +165,6 @@ export default function LandingPage() {
             Mayday keeps watch, does the legwork, and calls you only when a
             decision is yours to make.
           </p>
-          <Button
-            size="lg"
-            className="mt-8 bg-flare px-5 font-semibold text-white hover:opacity-90"
-            nativeButton={false}
-                render={<Link href="/command-room" />}
-          >
-            Open Command Room
-          </Button>
         </div>
       </section>
 
