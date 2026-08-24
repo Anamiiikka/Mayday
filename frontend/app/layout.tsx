@@ -12,7 +12,7 @@ const fraunces = Fraunces({
   variable: "--font-fraunces",
   subsets: ["latin"],
   style: ["normal", "italic"],
-  weight: ["400", "500", "600"],
+  weight: "variable",
 });
 
 const plexMono = IBM_Plex_Mono({
