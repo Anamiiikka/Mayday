@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { PoolClient } from "pg";
 import { z } from "zod";
 import { pool } from "./db.js";
 import { insertRecovery } from "./fake-cloud.js";
@@ -7,17 +8,58 @@ function json(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+function toolError(message: string) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: message }) }],
+    isError: true,
+  };
+}
+
+/** Run a mutation atomically: every statement commits together or not at all. */
+async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function serviceExists(client: PoolClient, service: string): Promise<boolean> {
+  const result = await client.query("SELECT 1 FROM services WHERE id = $1", [service]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Attach an audit row to the right incident: an explicit id when the caller
+ * names one, otherwise the open incident on the affected service.
+ */
 async function recordAction(
+  client: PoolClient,
+  target: { incidentId: string } | { service: string },
   type: string,
   params: Record<string, unknown>,
   result: string,
 ): Promise<void> {
-  const incident = await pool.query(
-    "SELECT id FROM incidents WHERE status <> 'resolved' ORDER BY created_at DESC LIMIT 1",
-  );
-  await pool.query(
+  let incidentId: string | null = null;
+  if ("incidentId" in target) {
+    incidentId = target.incidentId;
+  } else {
+    const open = await client.query(
+      "SELECT id FROM incidents WHERE service_id = $1 AND status <> 'resolved' ORDER BY created_at DESC LIMIT 1",
+      [target.service],
+    );
+    incidentId = open.rows[0]?.id ?? null;
+  }
+  await client.query(
     "INSERT INTO actions (incident_id, type, params, result) VALUES ($1, $2, $3, $4)",
-    [incident.rows[0]?.id ?? null, type, JSON.stringify(params), result],
+    [incidentId, type, JSON.stringify(params), result],
   );
 }
 
@@ -148,43 +190,67 @@ export function buildMcpServer(): McpServer {
       },
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
-    async ({ service, reason }) => {
-      await pool.query("UPDATE services SET status = 'healthy' WHERE id = $1", [service]);
-      await insertRecovery(pool, service);
-      await recordAction("restart_service", { service, reason }, "success");
-      return json({ ok: true, message: `${service} restarted; telemetry recovering.` });
-    },
+    async ({ service, reason }) =>
+      withTransaction(async (client) => {
+        if (!(await serviceExists(client, service))) {
+          return toolError(`Unknown service "${service}". Use get_service_health to list services.`);
+        }
+        await client.query("UPDATE services SET status = 'healthy' WHERE id = $1", [service]);
+        await insertRecovery(client, service);
+        await recordAction(client, { service }, "restart_service", { service, reason }, "success");
+        return json({ ok: true, message: `${service} restarted; telemetry recovering.` });
+      }),
   );
 
   server.registerTool(
     "rollback_deployment",
     {
       description:
-        "Roll a service back to a previous version. DESTRUCTIVE: replaces the running release. Requires human approval.",
+        "Roll a service back to a previously deployed version. DESTRUCTIVE: replaces the running release. Requires human approval.",
       inputSchema: {
         service: z.string(),
-        to_version: z.string().describe("Version to roll back to, e.g. v1.4.1"),
+        to_version: z.string().describe("A version from this service's deploy history, e.g. v1.4.1"),
         reason: z.string(),
       },
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
-    async ({ service, to_version, reason }) => {
-      await pool.query(
-        "UPDATE deployments SET status = 'rolled_back' WHERE service_id = $1 AND status = 'active'",
-        [service],
-      );
-      await pool.query(
-        "INSERT INTO deployments (service_id, version, deployed_at, status, changelog) VALUES ($1, $2, now(), 'active', $3)",
-        [service, to_version, `rollback: ${reason}`],
-      );
-      await pool.query(
-        "UPDATE services SET status = 'healthy', version = $2 WHERE id = $1",
-        [service, to_version],
-      );
-      await insertRecovery(pool, service);
-      await recordAction("rollback_deployment", { service, to_version, reason }, "success");
-      return json({ ok: true, message: `${service} rolled back to ${to_version}; telemetry recovering.` });
-    },
+    async ({ service, to_version, reason }) =>
+      withTransaction(async (client) => {
+        if (!(await serviceExists(client, service))) {
+          return toolError(`Unknown service "${service}". Use get_service_health to list services.`);
+        }
+        const history = await client.query(
+          "SELECT DISTINCT version FROM deployments WHERE service_id = $1",
+          [service],
+        );
+        const versions = history.rows.map((r) => r.version as string);
+        if (!versions.includes(to_version)) {
+          return toolError(
+            `Version "${to_version}" was never deployed for ${service}. Previously deployed: ${versions.join(", ")}.`,
+          );
+        }
+        await client.query(
+          "UPDATE deployments SET status = 'rolled_back' WHERE service_id = $1 AND status = 'active'",
+          [service],
+        );
+        await client.query(
+          "INSERT INTO deployments (service_id, version, deployed_at, status, changelog) VALUES ($1, $2, now(), 'active', $3)",
+          [service, to_version, `rollback: ${reason}`],
+        );
+        await client.query(
+          "UPDATE services SET status = 'healthy', version = $2 WHERE id = $1",
+          [service, to_version],
+        );
+        await insertRecovery(client, service);
+        await recordAction(
+          client,
+          { service },
+          "rollback_deployment",
+          { service, to_version, reason },
+          "success",
+        );
+        return json({ ok: true, message: `${service} rolled back to ${to_version}; telemetry recovering.` });
+      }),
   );
 
   server.registerTool(
@@ -199,11 +265,18 @@ export function buildMcpServer(): McpServer {
       },
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
-    async ({ service, replicas, reason }) => {
-      await pool.query("UPDATE services SET replicas = $2 WHERE id = $1", [service, replicas]);
-      await recordAction("scale_service", { service, replicas, reason }, "success");
-      return json({ ok: true, message: `${service} scaled to ${replicas} replicas.` });
-    },
+    async ({ service, replicas, reason }) =>
+      withTransaction(async (client) => {
+        const updated = await client.query(
+          "UPDATE services SET replicas = $2 WHERE id = $1",
+          [service, replicas],
+        );
+        if ((updated.rowCount ?? 0) === 0) {
+          return toolError(`Unknown service "${service}". Use get_service_health to list services.`);
+        }
+        await recordAction(client, { service }, "scale_service", { service, replicas, reason }, "success");
+        return json({ ok: true, message: `${service} scaled to ${replicas} replicas.` });
+      }),
   );
 
   server.registerTool(
@@ -217,11 +290,18 @@ export function buildMcpServer(): McpServer {
       },
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
-    async ({ id, resolution }) => {
-      await pool.query("UPDATE incidents SET status = 'resolved' WHERE id = $1", [id]);
-      await recordAction("resolve_incident", { id, resolution }, "success");
-      return json({ ok: true, message: `${id} resolved.` });
-    },
+    async ({ id, resolution }) =>
+      withTransaction(async (client) => {
+        const updated = await client.query(
+          "UPDATE incidents SET status = 'resolved' WHERE id = $1",
+          [id],
+        );
+        if ((updated.rowCount ?? 0) === 0) {
+          return toolError(`Unknown incident "${id}".`);
+        }
+        await recordAction(client, { incidentId: id }, "resolve_incident", { id, resolution }, "success");
+        return json({ ok: true, message: `${id} resolved.` });
+      }),
   );
 
   return server;

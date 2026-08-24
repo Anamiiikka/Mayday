@@ -1,4 +1,7 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
+
+/** Any pg query runner: the shared pool or a transaction client. */
+export type Db = Pool | PoolClient;
 
 /**
  * The "fake cloud": synthetic services, telemetry, and deploy history that
@@ -92,8 +95,22 @@ export async function createSchema(pool: Pool): Promise<void> {
 }
 
 /** Wipe all rows and reseed 2h of healthy telemetry plus the scripted failure. */
-export async function seed(pool: Pool): Promise<void> {
-  await createSchema(pool);
+export async function seed(dbPool: Pool): Promise<void> {
+  await createSchema(dbPool);
+  const client = await dbPool.connect();
+  try {
+    await client.query("BEGIN");
+    await seedInTransaction(client);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function seedInTransaction(pool: PoolClient): Promise<void> {
   await pool.query(
     "TRUNCATE actions, incidents, deployments, logs, metrics, services CASCADE",
   );
@@ -209,7 +226,7 @@ export async function seed(pool: Pool): Promise<void> {
 }
 
 /** After an approved fix, telemetry eases back to baseline over ~5 minutes. */
-export async function insertRecovery(pool: Pool, serviceId: string): Promise<void> {
+export async function insertRecovery(pool: Db, serviceId: string): Promise<void> {
   const now = Date.now();
   const rows: string[] = [];
   const params: unknown[] = [];
