@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { CommandRoomSection } from "@/components/command-room/section";
 import { Button } from "@/components/ui/button";
 
 function Wordmark() {
@@ -57,14 +58,14 @@ export default function LandingPage() {
             size="lg"
             className="mt-7 bg-flare px-5 font-semibold text-white hover:opacity-90"
             nativeButton={false}
-            render={<Link href="/command-room" />}
+            render={<a href="#command-room" />}
           >
             Open Command Room
           </Button>
         </div>
       </section>
 
-      {/* The Command Room lands here next. */}
+      <CommandRoomSection />
 
       {/* Closing band — the operator Mayday reports to. */}
       <section id="watch" className="relative isolate flex min-h-[64svh] items-center">
