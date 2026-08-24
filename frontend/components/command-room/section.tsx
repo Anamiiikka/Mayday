@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import {
   INCIDENTS,
@@ -102,7 +103,23 @@ function IncidentRow({ incident }: { incident: Incident }) {
 
 export function CommandRoomSection() {
   return (
-    <section id="command-room" className="border-y border-border">
+    <section id="command-room" className="relative isolate border-y border-border">
+      <Image
+        src="/bg.png"
+        alt=""
+        fill
+        sizes="100vw"
+        className="-z-10 object-cover"
+      />
+      <div className="absolute inset-0 -z-10 bg-background/85" aria-hidden />
+      <div
+        className="absolute inset-x-0 top-0 -z-10 h-40 bg-linear-to-b from-background to-transparent"
+        aria-hidden
+      />
+      <div
+        className="absolute inset-x-0 bottom-0 -z-10 h-40 bg-linear-to-t from-background to-transparent"
+        aria-hidden
+      />
       <div className="px-6 py-16 sm:px-10">
         <p className="font-mono text-xs tracking-[0.3em] text-amber">
           COMMAND ROOM
