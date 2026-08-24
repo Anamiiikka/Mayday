@@ -14,7 +14,7 @@ export default function CommandRoomPage() {
         The incident feed comes online next: live incidents, the agent&apos;s
         investigation timeline, and the approval console.
       </p>
-      <Button variant="outline" render={<Link href="/" />}>
+      <Button variant="outline" nativeButton={false} render={<Link href="/" />}>
         Back to overview
       </Button>
     </main>
