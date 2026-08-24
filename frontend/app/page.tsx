@@ -151,7 +151,7 @@ export default function LandingPage() {
           className="absolute inset-0 -z-10 bg-linear-to-b from-background via-background/40 to-background/80"
           aria-hidden
         />
-        <div className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10">
+        <div className="w-full px-6 py-20 sm:px-10">
           <p className="font-mono text-xs tracking-[0.3em] text-amber">
             ALWAYS ON WATCH
           </p>
@@ -169,7 +169,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="border-t border-border bg-background px-6 py-6 sm:px-10">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-10 gap-y-4">
+        <div className="flex w-full flex-wrap items-center justify-between gap-x-10 gap-y-4">
           <div className="flex items-center gap-3">
             <Image src="/mark.png" alt="Mayday" width={28} height={28} />
             <span className="text-sm text-muted-foreground">
