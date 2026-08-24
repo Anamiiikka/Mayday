@@ -45,7 +45,7 @@ export default function LandingPage() {
           <Wordmark />
         </div>
 
-        <div className="mt-auto px-6 pb-5 pt-40 sm:px-10 sm:pb-7">
+        <div className="mt-auto px-6 pb-8 pt-20 sm:px-10 sm:pb-10">
           <h1 className="max-w-4xl font-heading text-4xl leading-[1.08] sm:text-5xl lg:text-6xl">
             Production went down.
             <span className="block italic text-primary">Mayday picked up.</span>
