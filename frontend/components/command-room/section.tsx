@@ -12,7 +12,7 @@ import {
 const SEVERITY_STYLE: Record<Severity, string> = {
   "SEV-1": "border-signal/40 bg-signal/10 text-signal",
   "SEV-2": "border-amber/40 bg-amber/10 text-amber",
-  "SEV-3": "border-border bg-muted text-muted-foreground",
+  "SEV-3": "border-border bg-muted text-foreground/70",
 };
 
 const STATUS_STYLE: Record<IncidentStatus, string> = {
@@ -43,7 +43,7 @@ function HealthTiles() {
     {
       label: "AWAITING YOUR CLEARANCE",
       value: String(awaiting),
-      tone: awaiting === 0 ? "text-muted-foreground" : "text-primary",
+      tone: awaiting === 0 ? "text-foreground/70" : "text-primary",
     },
   ];
 
@@ -52,9 +52,9 @@ function HealthTiles() {
       {tiles.map((tile) => (
         <div
           key={tile.label}
-          className="rounded-md border border-border bg-panel/70 px-5 py-4"
+          className="rounded-md border border-border bg-panel/95 px-5 py-4"
         >
-          <p className="font-mono text-[10px] tracking-[0.25em] text-muted-foreground">
+          <p className="font-mono text-[10px] tracking-[0.25em] text-foreground/75">
             {tile.label}
           </p>
           <p className={`mt-2 font-heading text-4xl ${tile.tone}`}>
@@ -70,7 +70,7 @@ function IncidentRow({ incident }: { incident: Incident }) {
   return (
     <Link
       href={`/incidents/${incident.id}`}
-      className="group flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md border border-border bg-panel/70 px-5 py-4 transition-colors hover:border-amber/50"
+      className="group flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md border border-border bg-panel/95 px-5 py-4 transition-colors hover:border-amber/50"
     >
       <span
         className={`rounded-sm border px-2 py-0.5 font-mono text-[11px] tracking-wider ${SEVERITY_STYLE[incident.severity]}`}
@@ -79,7 +79,7 @@ function IncidentRow({ incident }: { incident: Incident }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium">{incident.title}</span>
-        <span className="mt-0.5 block font-mono text-[11px] tracking-wider text-muted-foreground">
+        <span className="mt-0.5 block font-mono text-[11px] tracking-wider text-foreground/70">
           {incident.id} · {incident.serviceId} · {incident.impact}
         </span>
       </span>
@@ -94,7 +94,7 @@ function IncidentRow({ incident }: { incident: Incident }) {
         )}
         {STATUS_LABEL[incident.status].toUpperCase()}
       </span>
-      <span className="font-mono text-[11px] tracking-wider text-muted-foreground transition-colors group-hover:text-amber">
+      <span className="font-mono text-[11px] tracking-wider text-foreground/80 transition-colors group-hover:text-amber">
         INVESTIGATE →
       </span>
     </Link>
@@ -126,7 +126,7 @@ export function CommandRoomSection() {
         <h2 className="mt-3 font-heading text-4xl sm:text-5xl">
           The floor is <em className="text-primary">live.</em>
         </h2>
-        <p className="mt-3 max-w-md text-foreground/90 [text-shadow:0_1px_8px_rgba(10,15,30,0.9)]">
+        <p className="mt-3 max-w-md font-medium text-foreground [text-shadow:0_1px_10px_rgba(10,15,30,0.95)]">
           Every incident, what the agent is doing about it, and what is
           waiting on you.
         </p>
