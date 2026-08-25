@@ -96,22 +96,40 @@ export function buildMcpServer(): McpServer {
     "query_metrics",
     {
       description:
-        "Per-minute telemetry for one service over a time window. Use this to see when a metric started degrading.",
+        "Telemetry for one service over a time window, downsampled into 5-minute buckets (oldest first) so trends are visible at a glance. Set raw=true only when you need per-minute samples for deeper analysis.",
       inputSchema: {
         service: z.string().describe("Service id, e.g. checkout-api"),
-        window_minutes: z.number().int().min(1).max(180).default(30),
+        window_minutes: z.number().int().min(1).max(180).default(45),
+        raw: z
+          .boolean()
+          .default(false)
+          .describe("Return per-minute rows instead of 5-minute buckets. Verbose — prefer buckets."),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ service, window_minutes }) => {
+    async ({ service, window_minutes, raw }) => {
+      if (raw) {
+        const result = await pool.query(
+          `SELECT ts, latency_p95_ms, error_rate, cpu_pct, rps
+           FROM metrics
+           WHERE service_id = $1 AND ts >= now() - ($2 || ' minutes')::interval AND ts <= now()
+           ORDER BY ts`,
+          [service, window_minutes],
+        );
+        return json(result.rows);
+      }
       const result = await pool.query(
-        `SELECT ts, latency_p95_ms, error_rate, cpu_pct, rps
+        `SELECT to_char(date_bin('5 minutes', ts, now()), 'HH24:MI') AS bucket,
+                round(avg(latency_p95_ms))::int AS latency_p95_ms,
+                round(avg(error_rate)::numeric, 3)::float8 AS error_rate,
+                round(avg(cpu_pct))::int AS cpu_pct,
+                round(avg(rps))::int AS rps
          FROM metrics
          WHERE service_id = $1 AND ts >= now() - ($2 || ' minutes')::interval AND ts <= now()
-         ORDER BY ts`,
+         GROUP BY 1 ORDER BY 1`,
         [service, window_minutes],
       );
-      return json(result.rows);
+      return json({ service, window_minutes, bucket: "5m avg", samples: result.rows });
     },
   );
 
@@ -119,26 +137,29 @@ export function buildMcpServer(): McpServer {
     "search_logs",
     {
       description:
-        "Recent log lines for a service, optionally filtered by level (info/warn/error) or a substring match.",
+        "Log summary for a service: distinct messages grouped by endpoint with counts and first/last occurrence, newest activity first. Optionally filter by level or a substring.",
       inputSchema: {
         service: z.string(),
         level: z.enum(["info", "warn", "error"]).optional(),
         query: z.string().optional().describe("Substring to match in the message"),
-        limit: z.number().int().min(1).max(200).default(50),
+        limit: z.number().int().min(1).max(50).default(10).describe("Max distinct message groups"),
       },
       annotations: { readOnlyHint: true },
     },
     async ({ service, level, query, limit }) => {
       const result = await pool.query(
-        `SELECT ts, level, endpoint, message
+        `SELECT level, endpoint, message, count(*)::int AS occurrences,
+                to_char(min(ts), 'HH24:MI') AS first_seen,
+                to_char(max(ts), 'HH24:MI') AS last_seen
          FROM logs
          WHERE service_id = $1
            AND ($2::text IS NULL OR level = $2)
            AND ($3::text IS NULL OR message ILIKE '%' || $3 || '%')
-         ORDER BY ts DESC LIMIT $4`,
+         GROUP BY level, endpoint, message
+         ORDER BY max(ts) DESC LIMIT $4`,
         [service, level ?? null, query ?? null, limit],
       );
-      return json(result.rows);
+      return json({ service, groups: result.rows });
     },
   );
 
