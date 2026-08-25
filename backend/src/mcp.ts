@@ -230,8 +230,13 @@ export function buildMcpServer(): McpServer {
         "Roll a service back to a previously deployed version. DESTRUCTIVE: replaces the running release. Requires human approval.",
       inputSchema: {
         service: z.string(),
-        to_version: z.string().describe("A version from this service's deploy history, e.g. v1.4.1"),
-        reason: z.string(),
+        to_version: z
+          .string()
+          .optional()
+          .describe(
+            "A version from this service's deploy history, e.g. v1.4.1. Omit to roll back to the version that ran before the current one.",
+          ),
+        reason: z.string().optional().describe("Why the rollback is warranted"),
       },
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
@@ -241,13 +246,22 @@ export function buildMcpServer(): McpServer {
           return toolError(`Unknown service "${service}". Use get_service_health to list services.`);
         }
         const history = await client.query(
-          "SELECT DISTINCT version FROM deployments WHERE service_id = $1",
+          "SELECT version, status FROM deployments WHERE service_id = $1 ORDER BY deployed_at DESC",
           [service],
         );
         const versions = history.rows.map((r) => r.version as string);
-        if (!versions.includes(to_version)) {
+        if (versions.length === 0) {
+          return toolError(`No deploy history for ${service}; nothing to roll back to.`);
+        }
+        const target = to_version ?? versions.find((v) => v !== versions[0]);
+        if (!target) {
           return toolError(
-            `Version "${to_version}" was never deployed for ${service}. Previously deployed: ${versions.join(", ")}.`,
+            `${service} has only ever run ${versions[0]}; there is no previous version to roll back to.`,
+          );
+        }
+        if (!versions.includes(target)) {
+          return toolError(
+            `Version "${target}" was never deployed for ${service}. Previously deployed: ${[...new Set(versions)].join(", ")}.`,
           );
         }
         await client.query(
@@ -256,21 +270,21 @@ export function buildMcpServer(): McpServer {
         );
         await client.query(
           "INSERT INTO deployments (service_id, version, deployed_at, status, changelog) VALUES ($1, $2, now(), 'active', $3)",
-          [service, to_version, `rollback: ${reason}`],
+          [service, target, `rollback: ${reason ?? "operator-approved rollback"}`],
         );
         await client.query(
           "UPDATE services SET status = 'healthy', version = $2 WHERE id = $1",
-          [service, to_version],
+          [service, target],
         );
         await insertRecovery(client, service);
         await recordAction(
           client,
           { service },
           "rollback_deployment",
-          { service, to_version, reason },
+          { service, to_version: target, reason },
           "success",
         );
-        return json({ ok: true, message: `${service} rolled back to ${to_version}; telemetry recovering.` });
+        return json({ ok: true, message: `${service} rolled back to ${target}; telemetry recovering.` });
       }),
   );
 
