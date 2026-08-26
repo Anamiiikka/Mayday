@@ -250,20 +250,35 @@ export function buildMcpServer(): McpServer {
           "SELECT version, status FROM deployments WHERE service_id = $1 ORDER BY deployed_at DESC",
           [service],
         );
-        const versions = history.rows.map((r) => r.version as string);
-        if (versions.length === 0) {
+        if (history.rows.length === 0) {
           return toolError(`No deploy history for ${service}; nothing to roll back to.`);
         }
-        const target = to_version ?? versions.find((v) => v !== versions[0]);
+        const running = history.rows[0].version as string;
+        const versions = history.rows.map((row) => row.version as string);
+
+        // Rolling back twice must not reinstate the release we just backed out
+        // of, so a version that has ever been rolled back is never the default
+        // target — walk back to the newest release that is still trusted.
+        const rolledBack = new Set(
+          history.rows
+            .filter((row) => row.status === "rolled_back")
+            .map((row) => row.version as string),
+        );
+        const target =
+          to_version ??
+          versions.find((version) => version !== running && !rolledBack.has(version));
         if (!target) {
           return toolError(
-            `${service} has only ever run ${versions[0]}; there is no previous version to roll back to.`,
+            `${service} has no earlier release to fall back to: every other version in its history has already been rolled back.`,
           );
         }
         if (!versions.includes(target)) {
           return toolError(
             `Version "${target}" was never deployed for ${service}. Previously deployed: ${[...new Set(versions)].join(", ")}.`,
           );
+        }
+        if (target === running) {
+          return toolError(`${service} is already running ${target}.`);
         }
         await client.query(
           "UPDATE deployments SET status = 'rolled_back' WHERE service_id = $1 AND status = 'active'",

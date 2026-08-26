@@ -102,6 +102,16 @@ export interface AgentState {
   error?: string;
 }
 
+/** Carries the HTTP status so callers can tell "no such incident" from "backend is down". */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}/api${path}`, {
     ...init,
@@ -110,7 +120,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `Request failed (${res.status})`);
+    throw new ApiError(body.error ?? `Request failed (${res.status})`, res.status);
   }
   return (await res.json()) as T;
 }

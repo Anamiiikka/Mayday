@@ -1,15 +1,28 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { pool } from "./db.js";
 import { seed } from "./fake-cloud.js";
 import { getAgentState, startInvestigation, submitApproval } from "./trueforge.js";
 
 export const routes = Router();
 
+/**
+ * Anything that dispatches an agent, clears a destructive action, or rewrites
+ * the demo cloud is guarded by a shared secret when one is configured. Left
+ * unset for local use, where the backend is only reachable from this machine.
+ */
+function requireOperator(req: Request, res: Response, next: NextFunction) {
+  const token = process.env.OPERATOR_TOKEN;
+  if (!token) return next();
+  if (req.headers.authorization === `Bearer ${token}`) return next();
+  res.status(401).json({ error: "Unauthorized: operator token required" });
+}
+
 /** Anything the agent has not resolved is still someone's problem. */
 routes.get("/incidents", async (_req, res, next) => {
   try {
     const incidents = await pool.query(
-      `SELECT i.id, i.title, i.severity, i.service_id, i.status, i.impact, i.created_at
+      `SELECT i.id, i.title, i.severity, i.service_id, i.status, i.impact,
+              i.created_at, i.session_id
        FROM incidents i ORDER BY i.created_at DESC`,
     );
     const services = await pool.query(
@@ -78,7 +91,7 @@ routes.get("/incidents/:id", async (req, res, next) => {
   }
 });
 
-routes.post("/agent/investigate", async (req, res, next) => {
+routes.post("/agent/investigate", requireOperator, async (req, res, next) => {
   try {
     const { incidentId } = req.body as { incidentId?: string };
     if (!incidentId) {
@@ -94,8 +107,9 @@ routes.post("/agent/investigate", async (req, res, next) => {
     }
     const started = await startInvestigation(incidentId, incident.rows[0].title as string);
     await pool.query(
-      "UPDATE incidents SET status = 'investigating' WHERE id = $1 AND status = 'open'",
-      [incidentId],
+      `UPDATE incidents SET status = 'investigating', session_id = $2
+       WHERE id = $1 AND status <> 'resolved'`,
+      [incidentId, started.sessionId],
     );
     res.json(started);
   } catch (err) {
@@ -105,13 +119,23 @@ routes.post("/agent/investigate", async (req, res, next) => {
 
 routes.get("/agent/sessions/:sessionId", async (req, res, next) => {
   try {
-    res.json(await getAgentState(req.params.sessionId));
+    const state = await getAgentState(req.params.sessionId);
+    // Mirror the run's state onto the incident so the feed shows who is
+    // waiting on a human, not just the operator with this page open.
+    if (state.status === "awaiting_approval" || state.status === "investigating") {
+      await pool.query(
+        `UPDATE incidents SET status = $2
+         WHERE session_id = $1 AND status <> 'resolved' AND status <> $2`,
+        [req.params.sessionId, state.status],
+      );
+    }
+    res.json(state);
   } catch (err) {
     next(err);
   }
 });
 
-routes.post("/agent/approve", async (req, res, next) => {
+routes.post("/agent/approve", requireOperator, async (req, res, next) => {
   try {
     const { sessionId, threadId, toolCallId, decision } = req.body as {
       sessionId?: string;
@@ -129,14 +153,36 @@ routes.post("/agent/approve", async (req, res, next) => {
       res.status(400).json({ error: 'decision must be "allow" or "deny"' });
       return;
     }
-    res.json(await submitApproval(sessionId, threadId, toolCallId, decision));
+
+    // Clear the call the agent is actually waiting on, not whatever id the
+    // caller supplied. Without this a stale tab — or a crafted request — could
+    // approve a different action than the one shown to the person deciding.
+    const state = await getAgentState(sessionId);
+    if (!state.pending) {
+      res.status(409).json({ error: "That run is not waiting on a decision." });
+      return;
+    }
+    if (state.pending.toolCallId !== toolCallId || state.pending.threadId !== threadId) {
+      res.status(409).json({
+        error: `This run is waiting on ${state.pending.tool}, not the action you approved. Reload the incident to see the current request.`,
+      });
+      return;
+    }
+
+    const result = await submitApproval(sessionId, threadId, toolCallId, decision);
+    await pool.query(
+      `UPDATE incidents SET status = 'investigating'
+       WHERE session_id = $1 AND status = 'awaiting_approval'`,
+      [sessionId],
+    );
+    res.json(result);
   } catch (err) {
     next(err);
   }
 });
 
 /** Reset the simulated cloud so the incident can be demonstrated again. */
-routes.post("/demo/reset", async (_req, res, next) => {
+routes.post("/demo/reset", requireOperator, async (_req, res, next) => {
   try {
     await seed(pool);
     res.json({ ok: true, message: "Fake cloud reseeded; INC-0042 is open again." });
