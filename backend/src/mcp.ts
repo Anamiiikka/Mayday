@@ -96,22 +96,41 @@ export function buildMcpServer(): McpServer {
     "query_metrics",
     {
       description:
-        "Per-minute telemetry for one service over a time window. Use this to see when a metric started degrading.",
+        "Telemetry for one service over a time window, downsampled into 5-minute buckets stamped MM-DD HH:MM (oldest first) so trends are visible at a glance. Set raw=true only when you need per-minute samples for deeper analysis.",
       inputSchema: {
         service: z.string().describe("Service id, e.g. checkout-api"),
-        window_minutes: z.number().int().min(1).max(180).default(30),
+        window_minutes: z.number().int().min(1).max(180).default(45),
+        raw: z
+          .boolean()
+          .default(false)
+          .describe("Return per-minute rows instead of 5-minute buckets. Verbose — prefer buckets."),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ service, window_minutes }) => {
+    async ({ service, window_minutes, raw }) => {
+      if (raw) {
+        const result = await pool.query(
+          `SELECT ts, latency_p95_ms, error_rate, cpu_pct, rps
+           FROM metrics
+           WHERE service_id = $1 AND ts >= now() - ($2 || ' minutes')::interval AND ts <= now()
+           ORDER BY ts`,
+          [service, window_minutes],
+        );
+        return json(result.rows);
+      }
       const result = await pool.query(
-        `SELECT ts, latency_p95_ms, error_rate, cpu_pct, rps
+        `SELECT to_char(date_bin('5 minutes', ts, now()), 'MM-DD HH24:MI') AS bucket,
+                round(avg(latency_p95_ms))::int AS latency_p95_ms,
+                round(avg(error_rate)::numeric, 3)::float8 AS error_rate,
+                round(avg(cpu_pct))::int AS cpu_pct,
+                round(avg(rps))::int AS rps
          FROM metrics
          WHERE service_id = $1 AND ts >= now() - ($2 || ' minutes')::interval AND ts <= now()
-         ORDER BY ts`,
+         GROUP BY date_bin('5 minutes', ts, now())
+         ORDER BY date_bin('5 minutes', ts, now())`,
         [service, window_minutes],
       );
-      return json(result.rows);
+      return json({ service, window_minutes, bucket: "5m avg", samples: result.rows });
     },
   );
 
@@ -119,26 +138,29 @@ export function buildMcpServer(): McpServer {
     "search_logs",
     {
       description:
-        "Recent log lines for a service, optionally filtered by level (info/warn/error) or a substring match.",
+        "Log summary for a service: distinct messages grouped by endpoint with counts and first/last occurrence stamped MM-DD HH:MM, newest activity first. Optionally filter by level or a substring.",
       inputSchema: {
         service: z.string(),
         level: z.enum(["info", "warn", "error"]).optional(),
         query: z.string().optional().describe("Substring to match in the message"),
-        limit: z.number().int().min(1).max(200).default(50),
+        limit: z.number().int().min(1).max(50).default(10).describe("Max distinct message groups"),
       },
       annotations: { readOnlyHint: true },
     },
     async ({ service, level, query, limit }) => {
       const result = await pool.query(
-        `SELECT ts, level, endpoint, message
+        `SELECT level, endpoint, message, count(*)::int AS occurrences,
+                to_char(min(ts), 'MM-DD HH24:MI') AS first_seen,
+                to_char(max(ts), 'MM-DD HH24:MI') AS last_seen
          FROM logs
          WHERE service_id = $1
            AND ($2::text IS NULL OR level = $2)
            AND ($3::text IS NULL OR message ILIKE '%' || $3 || '%')
-         ORDER BY ts DESC LIMIT $4`,
+         GROUP BY level, endpoint, message
+         ORDER BY max(ts) DESC LIMIT $4`,
         [service, level ?? null, query ?? null, limit],
       );
-      return json(result.rows);
+      return json({ service, groups: result.rows });
     },
   );
 
@@ -209,8 +231,13 @@ export function buildMcpServer(): McpServer {
         "Roll a service back to a previously deployed version. DESTRUCTIVE: replaces the running release. Requires human approval.",
       inputSchema: {
         service: z.string(),
-        to_version: z.string().describe("A version from this service's deploy history, e.g. v1.4.1"),
-        reason: z.string(),
+        to_version: z
+          .string()
+          .optional()
+          .describe(
+            "A version from this service's deploy history, e.g. v1.4.1. Omit to roll back to the version that ran before the current one.",
+          ),
+        reason: z.string().optional().describe("Why the rollback is warranted"),
       },
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
@@ -220,13 +247,22 @@ export function buildMcpServer(): McpServer {
           return toolError(`Unknown service "${service}". Use get_service_health to list services.`);
         }
         const history = await client.query(
-          "SELECT DISTINCT version FROM deployments WHERE service_id = $1",
+          "SELECT version, status FROM deployments WHERE service_id = $1 ORDER BY deployed_at DESC",
           [service],
         );
         const versions = history.rows.map((r) => r.version as string);
-        if (!versions.includes(to_version)) {
+        if (versions.length === 0) {
+          return toolError(`No deploy history for ${service}; nothing to roll back to.`);
+        }
+        const target = to_version ?? versions.find((v) => v !== versions[0]);
+        if (!target) {
           return toolError(
-            `Version "${to_version}" was never deployed for ${service}. Previously deployed: ${versions.join(", ")}.`,
+            `${service} has only ever run ${versions[0]}; there is no previous version to roll back to.`,
+          );
+        }
+        if (!versions.includes(target)) {
+          return toolError(
+            `Version "${target}" was never deployed for ${service}. Previously deployed: ${[...new Set(versions)].join(", ")}.`,
           );
         }
         await client.query(
@@ -235,21 +271,21 @@ export function buildMcpServer(): McpServer {
         );
         await client.query(
           "INSERT INTO deployments (service_id, version, deployed_at, status, changelog) VALUES ($1, $2, now(), 'active', $3)",
-          [service, to_version, `rollback: ${reason}`],
+          [service, target, `rollback: ${reason ?? "operator-approved rollback"}`],
         );
         await client.query(
           "UPDATE services SET status = 'healthy', version = $2 WHERE id = $1",
-          [service, to_version],
+          [service, target],
         );
         await insertRecovery(client, service);
         await recordAction(
           client,
           { service },
           "rollback_deployment",
-          { service, to_version, reason },
+          { service, to_version: target, reason },
           "success",
         );
-        return json({ ok: true, message: `${service} rolled back to ${to_version}; telemetry recovering.` });
+        return json({ ok: true, message: `${service} rolled back to ${target}; telemetry recovering.` });
       }),
   );
 

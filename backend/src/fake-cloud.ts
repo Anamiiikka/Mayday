@@ -228,15 +228,26 @@ async function seedInTransaction(pool: PoolClient): Promise<void> {
 /** After an approved fix, telemetry eases back to baseline over ~5 minutes. */
 export async function insertRecovery(pool: Db, serviceId: string): Promise<void> {
   const now = Date.now();
+  const steps = 5;
+  const stepMs = 30_000;
+
+  // The fix takes effect immediately, so the recovery curve has to land on
+  // samples the agent can actually read back: it ends at now(), not after it.
+  // Clear the degraded tail first so the newest sample is the healthy one.
+  await pool.query(
+    "DELETE FROM metrics WHERE service_id = $1 AND ts >= $2",
+    [serviceId, new Date(now - steps * stepMs)],
+  );
+
   const rows: string[] = [];
   const params: unknown[] = [];
   let p = 1;
-  for (let i = 0; i <= 5; i++) {
-    const ease = i / 5;
+  for (let i = 0; i <= steps; i++) {
+    const ease = i / steps;
     rows.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
     params.push(
       serviceId,
-      new Date(now + i * 30_000),
+      new Date(now - (steps - i) * stepMs),
       jitter(2400 - 2190 * ease, 80),
       +(8.1 - 7.9 * ease).toFixed(2),
       jitter(95 - 45 * ease, 4),
