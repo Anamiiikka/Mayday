@@ -106,7 +106,9 @@ sequenceDiagram
     TF->>API: rollback_deployment
     API->>DB: UPDATE (single transaction)
     TF->>API: query_metrics — verify recovery
-    TF-->>UI: recovered, incident resolved
+    UI->>API: GET /agent/sessions/:id (polling)
+    API->>TF: read turn state
+    API-->>UI: recovered, incident resolved
 ```
 
 ---
@@ -130,8 +132,12 @@ Nine MCP tools sit on top:
 
 Guarded tools are annotated `destructive` and listed in `require_approval_for_tools`, so TrueForge
 pauses the turn before any of them execute. They also run in a single transaction, validate that
-the target exists, and refuse to roll back to a version that was never deployed — or to one that
-has already been rolled back.
+the target exists, and refuse to roll back to a version that was never deployed.
+
+When no version is given, `rollback_deployment` picks the newest release that has not itself been
+rolled back, so backing out twice cannot reinstate the release you just backed out of. A version
+named explicitly is honoured as given — that is a deliberate instruction from someone who has
+already approved it.
 
 ---
 
@@ -248,4 +254,5 @@ No secrets are committed. Everything sensitive lives in `.env` files that are gi
 - **Mutations are atomic.** Each guarded tool commits its state change, telemetry and audit row in
   one transaction, so a partial failure leaves nothing half-applied.
 - **Everything is audited.** Every approved action is written to `actions` with its reason and
-  outcome, and shown in the incident's history.
+  outcome, and shown in the incident's history — including ones that were cleared and then refused
+  by validation, which are recorded as `refused: <why>` rather than vanishing.

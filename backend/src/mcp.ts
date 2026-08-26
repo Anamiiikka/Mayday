@@ -42,14 +42,21 @@ async function serviceExists(client: PoolClient, service: string): Promise<boole
  */
 async function recordAction(
   client: PoolClient,
-  target: { incidentId: string } | { service: string },
+  target: { incidentId: string | null } | { service: string },
   type: string,
   params: Record<string, unknown>,
   result: string,
 ): Promise<void> {
   let incidentId: string | null = null;
   if ("incidentId" in target) {
-    incidentId = target.incidentId;
+    // An id that no longer exists would violate the foreign key, so confirm it
+    // before attributing the row to it.
+    if (target.incidentId) {
+      const known = await client.query("SELECT 1 FROM incidents WHERE id = $1", [
+        target.incidentId,
+      ]);
+      incidentId = (known.rowCount ?? 0) > 0 ? target.incidentId : null;
+    }
   } else {
     const open = await client.query(
       "SELECT id FROM incidents WHERE service_id = $1 AND status <> 'resolved' ORDER BY created_at DESC LIMIT 1",
@@ -61,6 +68,23 @@ async function recordAction(
     "INSERT INTO actions (incident_id, type, params, result) VALUES ($1, $2, $3, $4)",
     [incidentId, type, JSON.stringify(params), result],
   );
+}
+
+
+/**
+ * A guarded tool that was approved and then refused still happened, as far as
+ * the operator is concerned. Record the attempt before returning the error so
+ * the incident history shows what was cleared and why it did not take effect.
+ */
+async function refuse(
+  client: PoolClient,
+  target: { incidentId: string | null } | { service: string },
+  type: string,
+  params: Record<string, unknown>,
+  message: string,
+) {
+  await recordAction(client, target, type, params, `refused: ${message}`);
+  return toolError(message);
 }
 
 /**
@@ -215,7 +239,8 @@ export function buildMcpServer(): McpServer {
     async ({ service, reason }) =>
       withTransaction(async (client) => {
         if (!(await serviceExists(client, service))) {
-          return toolError(`Unknown service "${service}". Use get_service_health to list services.`);
+          return refuse(client, { incidentId: null }, "restart_service", { service, reason },
+            `Unknown service "${service}". Use get_service_health to list services.`);
         }
         await client.query("UPDATE services SET status = 'healthy' WHERE id = $1", [service]);
         await insertRecovery(client, service);
@@ -244,14 +269,17 @@ export function buildMcpServer(): McpServer {
     async ({ service, to_version, reason }) =>
       withTransaction(async (client) => {
         if (!(await serviceExists(client, service))) {
-          return toolError(`Unknown service "${service}". Use get_service_health to list services.`);
+          return refuse(client, { incidentId: null }, "rollback_deployment",
+            { service, to_version, reason },
+            `Unknown service "${service}". Use get_service_health to list services.`);
         }
         const history = await client.query(
           "SELECT version, status FROM deployments WHERE service_id = $1 ORDER BY deployed_at DESC",
           [service],
         );
         if (history.rows.length === 0) {
-          return toolError(`No deploy history for ${service}; nothing to roll back to.`);
+          return refuse(client, { service }, "rollback_deployment", { service, to_version, reason },
+            `No deploy history for ${service}; nothing to roll back to.`);
         }
         const running = history.rows[0].version as string;
         const versions = history.rows.map((row) => row.version as string);
@@ -268,17 +296,16 @@ export function buildMcpServer(): McpServer {
           to_version ??
           versions.find((version) => version !== running && !rolledBack.has(version));
         if (!target) {
-          return toolError(
-            `${service} has no earlier release to fall back to: every other version in its history has already been rolled back.`,
-          );
+          return refuse(client, { service }, "rollback_deployment", { service, to_version, reason },
+            `${service} has no earlier release to fall back to: every other version in its history has already been rolled back.`);
         }
         if (!versions.includes(target)) {
-          return toolError(
-            `Version "${target}" was never deployed for ${service}. Previously deployed: ${[...new Set(versions)].join(", ")}.`,
-          );
+          return refuse(client, { service }, "rollback_deployment", { service, to_version, reason },
+            `Version "${target}" was never deployed for ${service}. Previously deployed: ${[...new Set(versions)].join(", ")}.`);
         }
         if (target === running) {
-          return toolError(`${service} is already running ${target}.`);
+          return refuse(client, { service }, "rollback_deployment", { service, to_version, reason },
+            `${service} is already running ${target}.`);
         }
         await client.query(
           "UPDATE deployments SET status = 'rolled_back' WHERE service_id = $1 AND status = 'active'",
@@ -323,7 +350,8 @@ export function buildMcpServer(): McpServer {
           [service, replicas],
         );
         if ((updated.rowCount ?? 0) === 0) {
-          return toolError(`Unknown service "${service}". Use get_service_health to list services.`);
+          return refuse(client, { incidentId: null }, "scale_service", { service, replicas, reason },
+            `Unknown service "${service}". Use get_service_health to list services.`);
         }
         await recordAction(client, { service }, "scale_service", { service, replicas, reason }, "success");
         return json({ ok: true, message: `${service} scaled to ${replicas} replicas.` });
@@ -348,7 +376,8 @@ export function buildMcpServer(): McpServer {
           [id],
         );
         if ((updated.rowCount ?? 0) === 0) {
-          return toolError(`Unknown incident "${id}".`);
+          return refuse(client, { incidentId: null }, "resolve_incident", { id, resolution },
+            `Unknown incident "${id}".`);
         }
         await recordAction(client, { incidentId: id }, "resolve_incident", { id, resolution }, "success");
         return json({ ok: true, message: `${id} resolved.` });
