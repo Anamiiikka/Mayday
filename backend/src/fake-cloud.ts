@@ -81,8 +81,12 @@ export async function createSchema(pool: Pool): Promise<void> {
       service_id TEXT NOT NULL REFERENCES services(id),
       status TEXT NOT NULL DEFAULT 'open',
       impact TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL
+      created_at TIMESTAMPTZ NOT NULL,
+      -- The TrueForge run investigating this incident, so its live state can
+      -- be written back to the feed the whole team is watching.
+      session_id TEXT
     );
+    ALTER TABLE incidents ADD COLUMN IF NOT EXISTS session_id TEXT;
     CREATE TABLE IF NOT EXISTS actions (
       id BIGSERIAL PRIMARY KEY,
       incident_id TEXT REFERENCES incidents(id),

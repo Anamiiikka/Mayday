@@ -3,6 +3,7 @@ import cors from "cors";
 import "dotenv/config";
 import express from "express";
 import { buildMcpServer } from "./mcp.js";
+import { routes } from "./routes.js";
 
 const app = express();
 
@@ -22,6 +23,9 @@ app.use(express.json());
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "mayday-backend" });
 });
+
+// Command Room API: incident data from Neon plus the TrueForge agent proxy.
+app.use("/api", routes);
 
 // Optional shared-secret auth for /mcp: destructive tools mutate the demo
 // cloud, so when MCP_TOKEN is set, only bearers of it may call the endpoint.
@@ -71,6 +75,28 @@ app.get("/mcp", (_req, res) => {
     id: null,
   });
 });
+
+// Surface failures as JSON so the Command Room can show what broke.
+app.use(
+  (
+    err: Error,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    console.error("Request failed:", err);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  },
+);
+
+if (!process.env.OPERATOR_TOKEN) {
+  console.warn(
+    "warning: OPERATOR_TOKEN is not set — agent, approval and reseed routes will refuse requests.",
+  );
+  console.warn(
+    "         Generate one with `openssl rand -hex 24`, then set it in backend/.env and frontend/.env.local.",
+  );
+}
 
 app.listen(port, () => {
   console.log(`mayday-backend listening on http://localhost:${port}`);
