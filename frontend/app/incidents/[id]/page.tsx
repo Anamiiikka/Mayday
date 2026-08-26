@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Investigation } from "@/components/command-room/investigation";
 import { Button } from "@/components/ui/button";
-import { ApiError, STATUS_LABEL, getIncident, type IncidentDetail } from "@/lib/api";
+import { BackendError, getIncident } from "@/lib/backend";
+import { STATUS_LABEL, type IncidentDetail } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,7 @@ export default async function IncidentPage({
     // Only an unknown incident is a 404. A backend that is down or erroring is
     // a retryable failure, and saying "not found" would send the operator
     // looking for a deleted incident during an outage.
-    if (err instanceof ApiError && err.status === 404) notFound();
+    if (err instanceof BackendError && err.status === 404) notFound();
     throw err;
   }
 

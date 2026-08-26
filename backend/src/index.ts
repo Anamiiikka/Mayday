@@ -89,6 +89,15 @@ app.use(
   },
 );
 
+if (!process.env.OPERATOR_TOKEN) {
+  console.warn(
+    "warning: OPERATOR_TOKEN is not set — agent, approval and reseed routes will refuse requests.",
+  );
+  console.warn(
+    "         Generate one with `openssl rand -hex 24`, then set it in backend/.env and frontend/.env.local.",
+  );
+}
+
 app.listen(port, () => {
   console.log(`mayday-backend listening on http://localhost:${port}`);
 });

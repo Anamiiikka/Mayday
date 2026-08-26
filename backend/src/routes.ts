@@ -7,17 +7,29 @@ export const routes = Router();
 
 /**
  * Anything that dispatches an agent, clears a destructive action, or rewrites
- * the demo cloud is guarded by a shared secret when one is configured. Left
- * unset for local use, where the backend is only reachable from this machine.
+ * the demo cloud requires the operator token. The Command Room holds it
+ * server-side and never ships it to the browser, so approving a rollback
+ * cannot be replayed by anything that merely reached this port.
+ *
+ * Refusing to run without a token is deliberate: an approval gate that anyone
+ * on the network can satisfy is not a gate.
  */
 function requireOperator(req: Request, res: Response, next: NextFunction) {
   const token = process.env.OPERATOR_TOKEN;
-  if (!token) return next();
-  if (req.headers.authorization === `Bearer ${token}`) return next();
+  if (!token) {
+    res.status(503).json({
+      error:
+        "OPERATOR_TOKEN is not set. Generate one (openssl rand -hex 24) and put the same value in backend/.env and frontend/.env.local.",
+    });
+    return;
+  }
+  if (req.headers.authorization === `Bearer ${token}`) {
+    next();
+    return;
+  }
   res.status(401).json({ error: "Unauthorized: operator token required" });
 }
 
-/** Anything the agent has not resolved is still someone's problem. */
 routes.get("/incidents", async (_req, res, next) => {
   try {
     const incidents = await pool.query(

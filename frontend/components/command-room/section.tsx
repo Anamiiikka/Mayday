@@ -1,13 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
+import { listIncidents } from "@/lib/backend";
 import {
   STATUS_LABEL,
-  listIncidents,
   type Incident,
   type IncidentStatus,
   type Service,
   type Severity,
-} from "@/lib/api";
+} from "@/lib/types";
 
 const SEVERITY_STYLE: Record<Severity, string> = {
   "SEV-1": "border-signal/40 bg-signal/10 text-signal",
