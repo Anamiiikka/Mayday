@@ -96,7 +96,7 @@ export function buildMcpServer(): McpServer {
     "query_metrics",
     {
       description:
-        "Telemetry for one service over a time window, downsampled into 5-minute buckets (oldest first) so trends are visible at a glance. Set raw=true only when you need per-minute samples for deeper analysis.",
+        "Telemetry for one service over a time window, downsampled into 5-minute buckets stamped MM-DD HH:MM (oldest first) so trends are visible at a glance. Set raw=true only when you need per-minute samples for deeper analysis.",
       inputSchema: {
         service: z.string().describe("Service id, e.g. checkout-api"),
         window_minutes: z.number().int().min(1).max(180).default(45),
@@ -119,14 +119,15 @@ export function buildMcpServer(): McpServer {
         return json(result.rows);
       }
       const result = await pool.query(
-        `SELECT to_char(date_bin('5 minutes', ts, now()), 'HH24:MI') AS bucket,
+        `SELECT to_char(date_bin('5 minutes', ts, now()), 'MM-DD HH24:MI') AS bucket,
                 round(avg(latency_p95_ms))::int AS latency_p95_ms,
                 round(avg(error_rate)::numeric, 3)::float8 AS error_rate,
                 round(avg(cpu_pct))::int AS cpu_pct,
                 round(avg(rps))::int AS rps
          FROM metrics
          WHERE service_id = $1 AND ts >= now() - ($2 || ' minutes')::interval AND ts <= now()
-         GROUP BY 1 ORDER BY 1`,
+         GROUP BY date_bin('5 minutes', ts, now())
+         ORDER BY date_bin('5 minutes', ts, now())`,
         [service, window_minutes],
       );
       return json({ service, window_minutes, bucket: "5m avg", samples: result.rows });
@@ -137,7 +138,7 @@ export function buildMcpServer(): McpServer {
     "search_logs",
     {
       description:
-        "Log summary for a service: distinct messages grouped by endpoint with counts and first/last occurrence, newest activity first. Optionally filter by level or a substring.",
+        "Log summary for a service: distinct messages grouped by endpoint with counts and first/last occurrence stamped MM-DD HH:MM, newest activity first. Optionally filter by level or a substring.",
       inputSchema: {
         service: z.string(),
         level: z.enum(["info", "warn", "error"]).optional(),
@@ -149,8 +150,8 @@ export function buildMcpServer(): McpServer {
     async ({ service, level, query, limit }) => {
       const result = await pool.query(
         `SELECT level, endpoint, message, count(*)::int AS occurrences,
-                to_char(min(ts), 'HH24:MI') AS first_seen,
-                to_char(max(ts), 'HH24:MI') AS last_seen
+                to_char(min(ts), 'MM-DD HH24:MI') AS first_seen,
+                to_char(max(ts), 'MM-DD HH24:MI') AS last_seen
          FROM logs
          WHERE service_id = $1
            AND ($2::text IS NULL OR level = $2)
