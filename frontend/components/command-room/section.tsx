@@ -1,13 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import {
-  INCIDENTS,
-  SERVICES,
   STATUS_LABEL,
+  listIncidents,
   type Incident,
   type IncidentStatus,
+  type Service,
   type Severity,
-} from "@/lib/incidents";
+} from "@/lib/api";
 
 const SEVERITY_STYLE: Record<Severity, string> = {
   "SEV-1": "border-signal/40 bg-signal/10 text-signal",
@@ -22,18 +22,24 @@ const STATUS_STYLE: Record<IncidentStatus, string> = {
   resolved: "text-phosphor",
 };
 
-function HealthTiles() {
-  const healthy = SERVICES.filter((s) => s.status === "healthy").length;
-  const open = INCIDENTS.filter((i) => i.status !== "resolved").length;
-  const awaiting = INCIDENTS.filter(
+function HealthTiles({
+  incidents,
+  services,
+}: {
+  incidents: Incident[];
+  services: Service[];
+}) {
+  const healthy = services.filter((s) => s.status === "healthy").length;
+  const open = incidents.filter((i) => i.status !== "resolved").length;
+  const awaiting = incidents.filter(
     (i) => i.status === "awaiting_approval",
   ).length;
 
   const tiles = [
     {
       label: "SERVICES HEALTHY",
-      value: `${healthy}/${SERVICES.length}`,
-      tone: healthy === SERVICES.length ? "text-phosphor" : "text-amber",
+      value: `${healthy}/${services.length}`,
+      tone: healthy === services.length ? "text-phosphor" : "text-amber",
     },
     {
       label: "OPEN INCIDENTS",
@@ -80,7 +86,7 @@ function IncidentRow({ incident }: { incident: Incident }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium">{incident.title}</span>
         <span className="mt-0.5 block font-mono text-[11px] tracking-wider text-foreground/70">
-          {incident.id} · {incident.serviceId} · {incident.impact}
+          {incident.id} · {incident.service_id} · {incident.impact}
         </span>
       </span>
       <span
@@ -101,7 +107,17 @@ function IncidentRow({ incident }: { incident: Incident }) {
   );
 }
 
-export function CommandRoomSection() {
+export async function CommandRoomSection() {
+  let incidents: Incident[] = [];
+  let services: Service[] = [];
+  let offline = false;
+  try {
+    ({ incidents, services } = await listIncidents());
+  } catch {
+    // The landing page still has to render when the backend is not running.
+    offline = true;
+  }
+
   return (
     <section id="command-room" className="relative isolate border-y border-border">
       <Image
@@ -130,14 +146,24 @@ export function CommandRoomSection() {
           Every incident, what the agent is doing about it, and what is
           waiting on you.
         </p>
-        <div className="mt-8">
-          <HealthTiles />
-        </div>
-        <div className="mt-6 flex flex-col gap-3">
-          {INCIDENTS.map((incident) => (
-            <IncidentRow key={incident.id} incident={incident} />
-          ))}
-        </div>
+        {offline ? (
+          <p className="mt-8 rounded-md border border-border bg-panel/95 px-5 py-4 font-mono text-sm text-muted-foreground">
+            The incident feed is offline. Start the backend with{" "}
+            <span className="text-foreground">npm run dev</span> in{" "}
+            <span className="text-foreground">backend/</span> to bring it up.
+          </p>
+        ) : (
+          <>
+            <div className="mt-8">
+              <HealthTiles incidents={incidents} services={services} />
+            </div>
+            <div className="mt-6 flex flex-col gap-3">
+              {incidents.map((incident) => (
+                <IncidentRow key={incident.id} incident={incident} />
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
