@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { CommandRoomSection } from "@/components/command-room/section";
 import { Button } from "@/components/ui/button";
 
 function Wordmark() {
@@ -44,7 +45,7 @@ export default function LandingPage() {
           <Wordmark />
         </div>
 
-        <div className="mt-auto px-6 pb-5 pt-40 sm:px-10 sm:pb-7">
+        <div className="mt-auto px-6 pb-8 pt-20 sm:px-10 sm:pb-10">
           <h1 className="max-w-4xl font-heading text-4xl leading-[1.08] sm:text-5xl lg:text-6xl">
             Production went down.
             <span className="block italic text-primary">Mayday picked up.</span>
@@ -57,14 +58,14 @@ export default function LandingPage() {
             size="lg"
             className="mt-7 bg-flare px-5 font-semibold text-white hover:opacity-90"
             nativeButton={false}
-            render={<Link href="/command-room" />}
+            render={<a href="#command-room" />}
           >
             Open Command Room
           </Button>
         </div>
       </section>
 
-      {/* The Command Room lands here next. */}
+      <CommandRoomSection />
 
       {/* Closing band — the operator Mayday reports to. */}
       <section id="watch" className="relative isolate flex min-h-[64svh] items-center">
