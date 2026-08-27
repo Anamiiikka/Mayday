@@ -18,17 +18,16 @@ you can see exactly what it intends to do, and why, before it does it.
 ## Contents
 
 [What a run looks like](#what-a-run-looks-like) ·
-[Why TrueForge is central](#why-trueforge-is-central) ·
+[Where the harness carries the weight](#where-the-harness-carries-the-weight) ·
 [Architecture](#architecture) ·
 [The simulated cloud](#the-simulated-cloud) ·
 [Running it](#running-it) ·
 [Choosing a model](#choosing-a-model) ·
 [Repository](#repository) ·
 [Safety model](#safety-model) ·
-[Design decisions](#design-decisions) ·
-[Testing and CI](#testing-and-ci) ·
-[Code review](#code-review) ·
-[Known limitations](#known-limitations) ·
+[Why it is built this way](#why-it-is-built-this-way) ·
+[How this is known to work](#how-this-is-known-to-work) ·
+[What it does not do](#what-it-does-not-do) ·
 [Status](#status)
 
 ---
@@ -54,7 +53,7 @@ After the approved rollback: `checkout-api` healthy on v1.4.1, **p95 217ms, erro
 
 ---
 
-## Why TrueForge is central
+## Where the harness carries the weight
 
 Mayday is not an LLM with a dashboard bolted on. Each of its defining behaviours is a harness
 primitive, and removing the harness removes the behaviour:
@@ -328,7 +327,7 @@ No secrets are committed. Everything sensitive lives in `.env` files that are gi
 
 ---
 
-## Design decisions
+## Why it is built this way
 
 - **The simulated cloud is a real database, not a stub.** Five services, two hours of per-minute
   telemetry and a deploy history live in Postgres, so the agent has to *find* the root cause rather
@@ -369,14 +368,19 @@ No secrets are committed. Everything sensitive lives in `.env` files that are gi
 
 ---
 
-## Testing and CI
+## How this is known to work
 
-GitHub Actions runs on every pull request:
+Three things stand between a plausible-looking agent and one you would let near production: what
+runs on every change, what the tests pin down, and what someone else caught that we did not.
+
+### On every pull request
 
 | Job | What it does |
 |---|---|
 | `frontend` | `eslint` and a production `next build` |
 | `backend` | `tsc --noEmit` over source *and* tests, `npm test`, then a build |
+
+### What the tests pin down
 
 The unit tests (`node:test`, no framework) cover the two pieces of logic that decide whether the
 approval gate holds — both of which had real bugs caught in review:
@@ -398,11 +402,9 @@ cd backend && npm test     # 20 tests, no database required
 ```
 
 The database-backed tool paths themselves are covered by the end-to-end run rather than by unit
-tests — see [Known limitations](#known-limitations).
+tests — see [what it does not do](#what-it-does-not-do).
 
----
-
-## Code review
+### What review caught that we did not
 
 Every change went through a pull request reviewed by [Qodo](https://qodo.ai), and the findings were
 fixed before merge rather than filed away. The fix commits are in the history:
@@ -422,7 +424,7 @@ approval gate, and neither was visible from the UI.
 
 ---
 
-## Known limitations
+## What it does not do
 
 Stated plainly, because a hackathon judge will find them anyway.
 
