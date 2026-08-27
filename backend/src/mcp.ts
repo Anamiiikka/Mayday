@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { z } from "zod";
 import { pool } from "./db.js";
 import { insertRecovery } from "./fake-cloud.js";
+import { chooseRollbackTarget } from "./rollback.js";
 
 function json(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -277,36 +278,13 @@ export function buildMcpServer(): McpServer {
           "SELECT version, status FROM deployments WHERE service_id = $1 ORDER BY deployed_at DESC",
           [service],
         );
-        if (history.rows.length === 0) {
-          return refuse(client, { service }, "rollback_deployment", { service, to_version, reason },
-            `No deploy history for ${service}; nothing to roll back to.`);
+        const choice = chooseRollbackTarget(service, history.rows, to_version);
+        if (!choice.ok) {
+          return refuse(client, { service }, "rollback_deployment",
+            { service, to_version, reason }, choice.reason);
         }
-        const running = history.rows[0].version as string;
-        const versions = history.rows.map((row) => row.version as string);
+        const target = choice.target;
 
-        // Rolling back twice must not reinstate the release we just backed out
-        // of, so a version that has ever been rolled back is never the default
-        // target — walk back to the newest release that is still trusted.
-        const rolledBack = new Set(
-          history.rows
-            .filter((row) => row.status === "rolled_back")
-            .map((row) => row.version as string),
-        );
-        const target =
-          to_version ??
-          versions.find((version) => version !== running && !rolledBack.has(version));
-        if (!target) {
-          return refuse(client, { service }, "rollback_deployment", { service, to_version, reason },
-            `${service} has no earlier release to fall back to: every other version in its history has already been rolled back.`);
-        }
-        if (!versions.includes(target)) {
-          return refuse(client, { service }, "rollback_deployment", { service, to_version, reason },
-            `Version "${target}" was never deployed for ${service}. Previously deployed: ${[...new Set(versions)].join(", ")}.`);
-        }
-        if (target === running) {
-          return refuse(client, { service }, "rollback_deployment", { service, to_version, reason },
-            `${service} is already running ${target}.`);
-        }
         await client.query(
           "UPDATE deployments SET status = 'rolled_back' WHERE service_id = $1 AND status = 'active'",
           [service],

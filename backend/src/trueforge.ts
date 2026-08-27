@@ -23,7 +23,13 @@ const GUARDED = new Set([
   "resolve_incident",
 ]);
 
-export type StepKind = "read" | "sandbox" | "guarded" | "harness" | "message";
+export type StepKind =
+  | "read"
+  | "sandbox"
+  | "guarded"
+  | "harness"
+  | "message"
+  | "subagent";
 
 export interface TimelineStep {
   id: string;
@@ -34,6 +40,8 @@ export interface TimelineStep {
   args?: unknown;
   result?: string;
   failed?: boolean;
+  /** Set when the step was performed by a sub-agent, not the main thread. */
+  lane?: string;
   at: string;
 }
 
@@ -110,6 +118,7 @@ function readCall(call: RawToolCall): {
 }
 
 function classify(tool: string): StepKind {
+  if (tool === "create_sub_agent") return "subagent";
   if (READ_ONLY.has(tool)) return "read";
   if (GUARDED.has(tool)) return "guarded";
   if (tool === "exec") return "sandbox";
@@ -118,6 +127,11 @@ function classify(tool: string): StepKind {
 
 function describe(tool: string, args: unknown): string | undefined {
   const a = (args ?? {}) as Record<string, unknown>;
+  if (tool === "create_sub_agent") {
+    // The brief is the interesting part, not the generated name.
+    const brief = String(a.input ?? "");
+    return brief.length > 300 ? `${brief.slice(0, 300)}…` : brief;
+  }
   if (tool === "exec") {
     const command = String(a.command ?? "");
     return command.length > 600 ? `${command.slice(0, 600)}…` : command;
@@ -141,16 +155,26 @@ export function buildTimeline(events: RawEvent[]): {
   const byCallId = new Map<string, TimelineStep>();
   const callInfo = new Map<string, { name: string; args: unknown }>();
   let error: string | undefined;
+  // Sub-agents run on their own threads. The first thread we see is the main
+  // one; anything else is a lane the operator should be able to tell apart.
+  let rootThread: string | undefined;
 
   for (const event of events) {
+    if (rootThread === undefined && event.thread_id) rootThread = event.thread_id;
+    const lane =
+      event.thread_id && rootThread && event.thread_id !== rootThread
+        ? event.thread_id
+        : undefined;
+
     switch (event.type) {
       case "model.message": {
         if (typeof event.content === "string" && event.content.trim()) {
           steps.push({
             id: event.id,
             kind: "message",
-            label: "Agent",
+            label: lane ? "Sub-agent" : "Agent",
             detail: event.content.trim(),
+            lane,
             at: event.created_at,
           });
         }
@@ -164,6 +188,7 @@ export function buildTimeline(events: RawEvent[]): {
             label: name,
             detail: describe(name, args),
             args,
+            lane,
             at: event.created_at,
           };
           callInfo.set(call.id, { name, args });
@@ -192,6 +217,47 @@ export function buildTimeline(events: RawEvent[]): {
   }
 
   return { steps, callInfo, error };
+}
+
+/** What the harness says a turn is waiting on. */
+export type TurnState = RawEvent["state"];
+
+/**
+ * Work out which tool call, if any, the operator is being asked to clear.
+ *
+ * Two things this has to get right. A turn that is running has already been
+ * resumed, so its earlier pause must not linger in front of the operator. And
+ * in Code Mode the agent reaches a tool from inside a sandbox script, so the
+ * call never appears in the timeline — the only description of it is the one
+ * carried on the required action itself.
+ */
+export function resolvePending(
+  state: TurnState,
+  callInfo: Map<string, { name: string; args: unknown }>,
+  running: boolean,
+): PendingApproval | null {
+  if (running) return null;
+  let pending: PendingApproval | null = null;
+  for (const action of state?.required_actions ?? []) {
+    if (action.type !== "tool.approval_required") continue;
+    for (const call of action.tool_calls ?? []) {
+      const info = callInfo.get(call.id) ?? readCall(call);
+      const args = (info.args ?? {}) as Record<string, unknown>;
+      pending = {
+        threadId: action.thread_id ?? "main",
+        toolCallId: call.id,
+        tool: info.name,
+        args,
+        reason:
+          typeof args.reason === "string"
+            ? args.reason
+            : typeof args.resolution === "string"
+              ? args.resolution
+              : undefined,
+      };
+    }
+  }
+  return pending;
 }
 
 export async function startInvestigation(incidentId: string, title: string) {
@@ -235,31 +301,7 @@ export async function getAgentState(sessionId: string): Promise<AgentState> {
   // The newest turn is the truth: a resumed turn supersedes the approval that
   // started it, so a stale pause never lingers in front of the operator.
   const running = turns.some((turn) => turn.state?.status === "running");
-  let pending: PendingApproval | null = null;
-  if (!running) {
-    for (const action of latest?.state?.required_actions ?? []) {
-      if (action.type !== "tool.approval_required") continue;
-      for (const call of action.tool_calls ?? []) {
-        // Usually the call is already in the timeline. In Code Mode it is not:
-        // the agent reaches the tool from inside a sandbox script, so the only
-        // description of it is the one carried on the required action itself.
-        const info = callInfo.get(call.id) ?? readCall(call);
-        const args = (info.args ?? {}) as Record<string, unknown>;
-        pending = {
-          threadId: action.thread_id ?? "main",
-          toolCallId: call.id,
-          tool: info.name,
-          args,
-          reason:
-            typeof args.reason === "string"
-              ? args.reason
-              : typeof args.resolution === "string"
-                ? args.resolution
-                : undefined,
-        };
-      }
-    }
-  }
+  const pending = resolvePending(latest?.state, callInfo, running);
 
   let status: AgentState["status"] = "investigating";
   if (latest?.state?.status === "error") status = "error";

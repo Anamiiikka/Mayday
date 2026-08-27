@@ -39,7 +39,7 @@ A real investigation, end to end, takes three turns and two approvals:
 
 | | The agent | The operator |
 |---|---|---|
-| **1. Investigate** | Reads the incident, 45 minutes of telemetry, error logs and deploy history. Runs a Python script in the sandbox to correlate the degradation against recent deploys. Proposes `rollback_deployment`. | Sees the evidence and the proposed action. **Approves.** |
+| **1. Investigate** | Reads the incident, then delegates two read-only sub-agents in parallel — a metrics analyst and a log analyst. Correlates their findings against deploy history, and runs a Python script in the sandbox to produce a structured diagnosis. Proposes `rollback_deployment`. | Sees the evidence and the proposed action. **Approves.** |
 | **2. Verify** | Executes the rollback, re-queries telemetry, confirms latency and error rate are recovering. Proposes `resolve_incident`. | Confirms recovery. **Approves.** |
 | **3. Report** | Summarises root cause, timeline and what was changed. | Done. |
 
@@ -63,6 +63,7 @@ primitive, and removing the harness removes the behaviour:
 |---|---|
 | Tools that read and change a live system | A remote MCP server, registered once and reached over streamable HTTP with a bearer token |
 | A hard stop before anything destructive | `require_approval_for_tools` — the turn ends `done` carrying `tool.approval_required`, and only a `user.tool_approval` input resumes it |
+| Two lines of evidence gathered at once | `dynamic_sub_agents` — the agent delegates a metrics analyst and a log analyst with `create_sub_agent`, each on its own thread |
 | Analysis the agent writes for itself | The local sandbox: a bubblewrap jail with a fresh Python interpreter, no package access and no route to the network |
 | A record an operator can audit afterwards | The session event log — every call, argument and result, replayed into the timeline |
 | Surviving a reload mid-incident | Session and turn state held by the harness, not in browser memory |
@@ -358,12 +359,29 @@ GitHub Actions runs on every pull request:
 | Job | What it does |
 |---|---|
 | `frontend` | `eslint` and a production `next build` |
-| `backend` | `tsc --noEmit` across the MCP server, proxy and seed |
+| `backend` | `tsc --noEmit` over source *and* tests, `npm test`, then a build |
 
-**There is no unit-test suite.** Verification is the end-to-end run — seed, investigate, approve,
-verify recovery, resolve — reproduced in both WSL2 and a fresh codespace, with the database checked
-afterwards for the version flip, the recovery curve and both audit rows. That is honest coverage of
-the demo path and thin coverage of everything else; see [Known limitations](#known-limitations).
+The unit tests (`node:test`, no framework) cover the two pieces of logic that decide whether the
+approval gate holds — both of which had real bugs caught in review:
+
+- **`chooseRollbackTarget`** — the one piece of judgement in an otherwise mechanical tool, and it
+  runs *after* a human has approved the action. Tested for the double-rollback case (backing out
+  twice must not reinstate the release just backed out of), unknown versions, no history, a target
+  already running, and an explicitly named version being honoured as given.
+- **`resolvePending`** — what the operator is actually being asked to clear. Tested for a resumed
+  turn no longer showing its old pause, and for naming the tool correctly when Code Mode kept the
+  call off the timeline. That second case is the "Mayday wants to run *unknown*" regression.
+
+Alongside those, `buildTimeline` is tested for pairing calls with responses, classifying tools by
+how much trust they need, hiding harness bookkeeping, unwrapping `call_tool`, flagging refusals,
+and putting sub-agent work in its own lane.
+
+```bash
+cd backend && npm test     # 20 tests, no database required
+```
+
+The database-backed tool paths themselves are covered by the end-to-end run rather than by unit
+tests — see [Known limitations](#known-limitations).
 
 ---
 
@@ -391,10 +409,9 @@ approval gate, and neither was visible from the UI.
 
 Stated plainly, because a hackathon judge will find them anyway.
 
-- **No unit tests.** The end-to-end run is verified; individual tool functions are not.
-- **No sub-agents.** `dynamic_sub_agents` is enabled in the agent config, but the SOP does not fan
-  out — one agent does the whole investigation. The parallel metrics/log analyst lanes were designed
-  and not built.
+- **The tests stop at the database.** Pure decision logic is unit-tested; the transactional tool
+  bodies are exercised only by the end-to-end run. Testing those properly means a Postgres service
+  container in CI, which is the next thing worth building.
 - **Session resume works but is silent.** The session id is persisted and state is re-read from the
   harness on load, so a reload mid-incident recovers the run. There is no banner announcing it.
 - **The Command Room polls, it does not stream.** State is re-read every four seconds rather than
@@ -417,7 +434,8 @@ Stated plainly, because a hackathon judge will find them anyway.
 - [x] Live agent loop wired into the UI, with the approval round trip
 - [x] Sandbox verified running agent-written Python under bubblewrap
 - [x] One-click Codespaces environment
+- [x] Sub-agent fan-out: parallel metrics and log analysts, rendered as lanes
+- [x] Unit tests on the approval-gate decision logic
 - [x] All review findings cleared
-- [ ] Sub-agent fan-out
-- [ ] Unit tests
+- [ ] Integration tests against a Postgres service container
 - [ ] Second incident scenario
