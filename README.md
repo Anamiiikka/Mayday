@@ -93,6 +93,7 @@ flowchart LR
     subgraph tf["TrueForge :8790"]
         GATE{{"Approval policy<br/>pauses restart · rollback<br/>scale · resolve"}}
         LOOP["Agent loop"]
+        SUBS["Sub-agents<br/>metrics · log analysts<br/>read-only, in parallel"]
         SB["Sandbox<br/>bwrap"]
         LLM["Gemini 3.5 Flash Lite"]
     end
@@ -103,9 +104,11 @@ flowchart LR
     RH <--> PROXY
     PROXY <--> LOOP
     GATE -.-> LOOP
+    LOOP <--> SUBS
     LOOP <--> SB
     LOOP <--> LLM
     LOOP <--> MCP
+    SUBS <--> MCP
     MCP <--> DB
     PROXY <--> DB
 ```
@@ -288,11 +291,14 @@ usually why.
 ## Repository
 
 ```
-backend/     Express: fake-cloud MCP server, Neon access, TrueForge proxy
-frontend/    Next.js: landing page, Command Room, approval console
-trueforge/   agent.json — instructions, gated tools, sandbox config
-scripts/     sandbox host setup (bubblewrap deps, offline pip wheels)
-.devcontainer/  one-click Codespaces environment
+backend/          Express: fake-cloud MCP server, Neon access, TrueForge proxy
+  src/rollback.ts     which release a rollback falls back to — pure, tested
+  src/*.test.ts       node:test suites, colocated with what they cover
+frontend/         Next.js: landing page, Command Room, approval console
+trueforge/        agent.json — SOP, sub-agent fan-out, gated tools, sandbox
+scripts/          sandbox host setup (bubblewrap deps, offline pip wheels)
+.devcontainer/    one-click Codespaces environment
+.github/workflows/  CI: lint, typecheck, tests, builds
 ```
 
 No secrets are committed. Everything sensitive lives in `.env` files that are gitignored; the
@@ -304,6 +310,10 @@ No secrets are committed. Everything sensitive lives in `.env` files that are gi
 
 - **Investigation cannot change anything.** The tools the agent reaches for on its own are
   read-only; the ones that mutate state are gated by the harness.
+- **Delegation does not widen what the agent can do.** Sub-agents are briefed to gather evidence
+  read-only, and the gate does not depend on their obedience: `require_approval_for_tools` is
+  enforced per tool by the harness, so a sub-agent that reached for `rollback_deployment` would
+  pause for the same human approval its parent would.
 - **Approvals are bound to a specific call.** The backend re-reads what the agent is actually
   waiting on and answers `409` if the decision does not match, so a stale tab cannot clear an
   action other than the one it displayed.
@@ -345,6 +355,13 @@ No secrets are committed. Everything sensitive lives in `.env` files that are gi
   operator needs to see afterwards.
 - **One scenario, finished.** A second incident type was scoped and dropped in favour of making the
   checkout rollback work end to end, including recovery telemetry the agent can actually read back.
+- **Evidence gathering fans out; remediation does not.** Metrics and logs are independent lines of
+  evidence, so two sub-agents collect them in parallel and the parent correlates. Everything after
+  that — the diagnosis, the proposal, the mutation — stays on one thread, because an approval
+  should be for one action taken by one actor.
+- **Tests start at the approval gate, not at the edges.** The two functions that decide whether the
+  gate holds were lifted out of the code that talks to Postgres and the harness so they could be
+  tested directly. Both had real bugs found in review; both now have the regression pinned.
 - **The model was chosen on rate limits, not benchmarks.** An investigation is 10–20 calls; see
   [Choosing a model](#choosing-a-model).
 - **The codespace is the deployment.** The sandbox needs a container that may create user
