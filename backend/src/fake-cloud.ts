@@ -20,6 +20,11 @@ export const SERVICES = [
 
 export const BAD_VERSION = "v1.4.2";
 export const INCIDENT_ID = "INC-0042";
+/** The second scenario: a slow leak with no deploy behind it. */
+export const LEAK_INCIDENT_ID = "INC-0043";
+
+/** Services carrying a scripted failure, and how they present. */
+const DEGRADED = new Set(["checkout-api", "payments-worker"]);
 
 const HEALTHY_ERROR_MESSAGES = [
   ["info", "/health", "healthcheck ok"],
@@ -32,6 +37,15 @@ const FAILURE_LOG_MESSAGES = [
   ["error", "/api/checkout", "ECONNRESET talking to postgres: connection closed unexpectedly"],
   ["error", "/api/cart", "upstream checkout-api responded 503"],
   ["warn", "/api/checkout", "connection pool at 100/100, queueing request"],
+] as const;
+
+// Deliberately different in kind: memory pressure and GC, not connection
+// errors, and almost no failed requests. Nothing here points at a release.
+const LEAK_LOG_MESSAGES = [
+  ["warn", "/internal/jobs", "heap usage 94% of limit, GC pause 1,240ms"],
+  ["warn", "/internal/jobs", "old gen occupancy 91% after full GC"],
+  ["warn", "/api/payments", "batch flush took 1,430ms (threshold 500ms)"],
+  ["error", "/api/payments", "worker missed health probe: no response within 30s"],
 ] as const;
 
 function jitter(base: number, spread: number): number {
@@ -121,16 +135,20 @@ async function seedInTransaction(pool: PoolClient): Promise<void> {
 
   const now = Date.now();
   const incidentStart = now - 15 * 60_000;
+  // The leak has been building for an hour and a half — long before anything
+  // was released, which is the whole point of the second scenario.
+  const leakStart = now - 90 * 60_000;
 
   for (const svc of SERVICES) {
-    const isBroken = svc.id === "checkout-api";
     await pool.query(
       "INSERT INTO services (id, status, region, version) VALUES ($1, $2, $3, $4)",
       [
         svc.id,
-        isBroken ? "degraded" : "healthy",
+        DEGRADED.has(svc.id) ? "degraded" : "healthy",
         svc.region,
-        isBroken ? BAD_VERSION : svc.goodVersion,
+        // Only checkout has a bad release; the leak is running the good one,
+        // which is what makes the deploy history the wrong place to look.
+        svc.id === "checkout-api" ? BAD_VERSION : svc.goodVersion,
       ],
     );
   }
@@ -160,25 +178,45 @@ async function seedInTransaction(pool: PoolClient): Promise<void> {
     );
   }
 
-  // Two hours of per-minute metrics; checkout degrades after its deploy.
+  // Two hours of per-minute metrics. Checkout steps off a cliff at its deploy;
+  // payments drifts upward for an hour and a half with its error rate flat.
+  const sample = (serviceId: string, at: number) => {
+    if (serviceId === "checkout-api" && at >= incidentStart) {
+      const ramp = Math.min(1, (at - incidentStart) / (5 * 60_000));
+      return [
+        jitter(150 + 2250 * ramp, 150),
+        +(0.3 + 7.8 * ramp).toFixed(2),
+        jitter(55 + 40 * ramp, 5),
+        jitter(620 - 260 * ramp, 40),
+      ];
+    }
+    if (serviceId === "payments-worker" && at >= leakStart) {
+      const ramp = Math.min(1, (at - leakStart) / (85 * 60_000));
+      return [
+        jitter(140 + 470 * ramp, 25),
+        // Barely moves. Requests are slow, not failing — a rollback would be
+        // the wrong read, and the error rate is what says so.
+        +(0.3 + 0.3 * ramp).toFixed(2),
+        jitter(45 + 47 * ramp, 3),
+        jitter(600 - 80 * ramp, 30),
+      ];
+    }
+    return [
+      jitter(140, 40),
+      +(0.1 + Math.random() * 0.4).toFixed(2),
+      jitter(45, 12),
+      jitter(600, 150),
+    ];
+  };
+
   const metricValues: string[] = [];
   const metricParams: unknown[] = [];
   let p = 1;
   for (const svc of SERVICES) {
     for (let i = 120; i >= 0; i--) {
       const ts = new Date(now - i * 60_000);
-      const broken = svc.id === "checkout-api" && ts.getTime() >= incidentStart;
-      const minutesIn = broken ? (ts.getTime() - incidentStart) / 60_000 : 0;
-      const ramp = broken ? Math.min(1, minutesIn / 5) : 0;
       metricValues.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
-      metricParams.push(
-        svc.id,
-        ts,
-        broken ? jitter(150 + 2250 * ramp, 150) : jitter(140, 40),
-        broken ? +(0.3 + 7.8 * ramp).toFixed(2) : +(0.1 + Math.random() * 0.4).toFixed(2),
-        broken ? jitter(55 + 40 * ramp, 5) : jitter(45, 12),
-        broken ? jitter(620 - 260 * ramp, 40) : jitter(600, 150),
-      );
+      metricParams.push(svc.id, ts, ...sample(svc.id, ts.getTime()));
     }
   }
   await pool.query(
@@ -186,7 +224,8 @@ async function seedInTransaction(pool: PoolClient): Promise<void> {
     metricParams,
   );
 
-  // Logs: routine chatter everywhere, failure signatures on checkout.
+  // Logs: routine chatter everywhere, plus each incident's signature — pool
+  // exhaustion on checkout, heap pressure on payments.
   const logValues: string[] = [];
   const logParams: unknown[] = [];
   p = 1;
@@ -210,6 +249,17 @@ async function seedInTransaction(pool: PoolClient): Promise<void> {
       message,
     );
   }
+  for (let i = 0; i < 24; i++) {
+    const [level, endpoint, message] = LEAK_LOG_MESSAGES[i % LEAK_LOG_MESSAGES.length]!;
+    logValues.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+    logParams.push(
+      "payments-worker",
+      new Date(leakStart + Math.random() * 90 * 60_000),
+      level,
+      endpoint,
+      message,
+    );
+  }
   await pool.query(
     `INSERT INTO logs (service_id, ts, level, endpoint, message) VALUES ${logValues.join(",")}`,
     logParams,
@@ -227,6 +277,19 @@ async function seedInTransaction(pool: PoolClient): Promise<void> {
       new Date(incidentStart + 3 * 60_000),
     ],
   );
+
+  await pool.query(
+    "INSERT INTO incidents (id, title, severity, service_id, status, impact, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    [
+      LEAK_INCIDENT_ID,
+      "Payments worker slowing under memory pressure",
+      "SEV-2",
+      "payments-worker",
+      "open",
+      "p95 610 ms · CPU 92% · no deploy in 26 h",
+      new Date(now - 55 * 60_000),
+    ],
+  );
 }
 
 /** After an approved fix, telemetry eases back to baseline over ~5 minutes. */
@@ -234,6 +297,28 @@ export async function insertRecovery(pool: Db, serviceId: string): Promise<void>
   const now = Date.now();
   const steps = 5;
   const stepMs = 30_000;
+
+  // Recovery has to start where the service actually is and end where it was
+  // before it degraded. Reading both from the service's own history means a
+  // restart on one service cannot replay another service's numbers.
+  const degraded = await pool.query(
+    `SELECT latency_p95_ms, error_rate, cpu_pct, rps
+     FROM metrics WHERE service_id = $1 ORDER BY ts DESC LIMIT 1`,
+    [serviceId],
+  );
+  const healthy = await pool.query(
+    `SELECT round(avg(latency_p95_ms))::int AS latency_p95_ms,
+            round(avg(error_rate)::numeric, 2)::float8 AS error_rate,
+            round(avg(cpu_pct))::int AS cpu_pct,
+            round(avg(rps))::int AS rps
+     FROM (
+       SELECT * FROM metrics WHERE service_id = $1 ORDER BY ts ASC LIMIT 30
+     ) AS before_it_broke`,
+    [serviceId],
+  );
+  const from = degraded.rows[0];
+  const to = healthy.rows[0];
+  if (!from || !to) return;
 
   // The fix takes effect immediately, so the recovery curve has to land on
   // samples the agent can actually read back: it ends at now(), not after it.
@@ -246,16 +331,17 @@ export async function insertRecovery(pool: Db, serviceId: string): Promise<void>
   const rows: string[] = [];
   const params: unknown[] = [];
   let p = 1;
+  const ease = (start: number, end: number, at: number) => start + (end - start) * at;
   for (let i = 0; i <= steps; i++) {
-    const ease = i / steps;
+    const at = i / steps;
     rows.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
     params.push(
       serviceId,
       new Date(now - (steps - i) * stepMs),
-      jitter(2400 - 2190 * ease, 80),
-      +(8.1 - 7.9 * ease).toFixed(2),
-      jitter(95 - 45 * ease, 4),
-      jitter(360 + 240 * ease, 40),
+      jitter(ease(from.latency_p95_ms, to.latency_p95_ms, at), 40),
+      +ease(from.error_rate, to.error_rate, at).toFixed(2),
+      jitter(ease(from.cpu_pct, to.cpu_pct, at), 4),
+      jitter(ease(from.rps, to.rps, at), 30),
     );
   }
   await pool.query(

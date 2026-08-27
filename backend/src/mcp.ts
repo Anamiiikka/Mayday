@@ -5,6 +5,20 @@ import { pool } from "./db.js";
 import { insertRecovery } from "./fake-cloud.js";
 import { chooseRollbackTarget } from "./rollback.js";
 
+/**
+ * A tool that rejects a near-miss argument makes the model guess again, and a
+ * guess costs a model call the operator does not have to spare during an
+ * outage. These accept what the agent plausibly sends and normalise it.
+ */
+const optionalEnum = <T extends readonly [string, ...string[]]>(values: T) =>
+  z.preprocess(
+    (value) =>
+      value === null || value === "" || value === "all" || value === "any"
+        ? undefined
+        : value,
+    z.enum(values).optional(),
+  );
+
 function json(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
@@ -100,13 +114,14 @@ export function buildMcpServer(): McpServer {
     "get_service_health",
     {
       description:
-        "Current status of every service with its latest telemetry sample (latency p95, error rate, CPU, RPS).",
+        "Current status of every service with its latest telemetry sample. error_rate_pct is already a percentage: 8.1 means 8.1% of requests failed, 0.4 means 0.4%.",
       annotations: { readOnlyHint: true },
     },
     async () => {
       const result = await pool.query(`
         SELECT s.id, s.status, s.region, s.version, s.replicas,
-               m.ts AS sampled_at, m.latency_p95_ms, m.error_rate, m.cpu_pct, m.rps
+               m.ts AS sampled_at, m.latency_p95_ms,
+               m.error_rate AS error_rate_pct, m.cpu_pct, m.rps
         FROM services s
         LEFT JOIN LATERAL (
           SELECT * FROM metrics WHERE service_id = s.id AND ts <= now() ORDER BY ts DESC LIMIT 1
@@ -121,7 +136,7 @@ export function buildMcpServer(): McpServer {
     "query_metrics",
     {
       description:
-        "Telemetry for one service over a time window, downsampled into 5-minute buckets stamped MM-DD HH:MM (oldest first) so trends are visible at a glance. Set raw=true only when you need per-minute samples for deeper analysis.",
+        "Telemetry for one service over a time window, downsampled into 5-minute buckets stamped MM-DD HH:MM (oldest first) so trends are visible at a glance. error_rate_pct is already a percentage: 8.1 means 8.1% of requests failed, 0.4 means 0.4% — do not multiply it by 100. Set raw=true only when you need per-minute samples for deeper analysis.",
       inputSchema: {
         service: z.string().describe("Service id, e.g. checkout-api"),
         window_minutes: z.number().int().min(1).max(180).default(45),
@@ -135,7 +150,7 @@ export function buildMcpServer(): McpServer {
     async ({ service, window_minutes, raw }) => {
       if (raw) {
         const result = await pool.query(
-          `SELECT ts, latency_p95_ms, error_rate, cpu_pct, rps
+          `SELECT ts, latency_p95_ms, error_rate AS error_rate_pct, cpu_pct, rps
            FROM metrics
            WHERE service_id = $1 AND ts >= now() - ($2 || ' minutes')::interval AND ts <= now()
            ORDER BY ts`,
@@ -146,7 +161,7 @@ export function buildMcpServer(): McpServer {
       const result = await pool.query(
         `SELECT to_char(date_bin('5 minutes', ts, now()), 'MM-DD HH24:MI') AS bucket,
                 round(avg(latency_p95_ms))::int AS latency_p95_ms,
-                round(avg(error_rate)::numeric, 3)::float8 AS error_rate,
+                round(avg(error_rate)::numeric, 3)::float8 AS error_rate_pct,
                 round(avg(cpu_pct))::int AS cpu_pct,
                 round(avg(rps))::int AS rps
          FROM metrics
@@ -163,10 +178,10 @@ export function buildMcpServer(): McpServer {
     "search_logs",
     {
       description:
-        "Log summary for a service: distinct messages grouped by endpoint with counts and first/last occurrence stamped MM-DD HH:MM, newest activity first. Optionally filter by level or a substring.",
+        "Log summary for a service: distinct messages grouped by endpoint with counts and first/last occurrence stamped MM-DD HH:MM, newest activity first. Omit level to see every line — a root cause is often logged as a warning, not an error.",
       inputSchema: {
-        service: z.string(),
-        level: z.enum(["info", "warn", "error"]).optional(),
+        service: z.string().describe("Service id, e.g. payments-worker"),
+        level: optionalEnum(["info", "warn", "error"]),
         query: z.string().optional().describe("Substring to match in the message"),
         limit: z.number().int().min(1).max(50).default(10).describe("Max distinct message groups"),
       },
@@ -213,10 +228,15 @@ export function buildMcpServer(): McpServer {
     "get_incident",
     {
       description: "Details of one incident, including actions taken so far.",
-      inputSchema: { id: z.string().describe("Incident id, e.g. INC-0042") },
+      inputSchema: {
+        id: z.string().optional().describe("Incident id, e.g. INC-0042"),
+        incident_id: z.string().optional().describe("Alias for id."),
+      },
       annotations: { readOnlyHint: true },
     },
-    async ({ id }) => {
+    async (args) => {
+      const id = args.id ?? args.incident_id;
+      if (!id) return toolError("Pass the incident id, e.g. { \"id\": \"INC-0042\" }.");
       const incident = await pool.query("SELECT * FROM incidents WHERE id = $1", [id]);
       const actions = await pool.query(
         "SELECT type, params, executed_at, result FROM actions WHERE incident_id = $1 ORDER BY executed_at",

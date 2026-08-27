@@ -17,19 +17,19 @@ you can see exactly what it intends to do, and why, before it does it.
 
 ## Contents
 
-[What a run looks like](#what-a-run-looks-like) ·
-[Where the harness carries the weight](#where-the-harness-carries-the-weight) ·
-[Architecture](#architecture) ·
-[The simulated cloud](#the-simulated-cloud) ·
-[Running it](#running-it) ·
-[Choosing a model](#choosing-a-model) ·
-[Repository](#repository) ·
-[Safety model](#safety-model) ·
-[Design decisions](#design-decisions) ·
-[How this is known to work](#how-this-is-known-to-work) ·
-[Qodo code review evidence](#qodo-code-review-evidence) ·
-[Known limitations](#known-limitations) ·
-[Status](#status)
+- [What a run looks like](#what-a-run-looks-like)
+- [Where the harness carries the weight](#where-the-harness-carries-the-weight)
+- [Architecture](#architecture)
+- [The simulated cloud](#the-simulated-cloud)
+- [Running it](#running-it)
+- [Choosing a model](#choosing-a-model)
+- [Repository](#repository)
+- [Safety model](#safety-model)
+- [Design decisions](#design-decisions)
+- [How this is known to work](#how-this-is-known-to-work)
+- [Qodo code review evidence](#qodo-code-review-evidence)
+- [Known limitations](#known-limitations)
+- [Status](#status)
 
 ---
 
@@ -39,7 +39,7 @@ A real investigation, end to end, takes three turns and two approvals:
 
 | | The agent | The operator |
 |---|---|---|
-| **1. Investigate** | Reads the incident, then delegates two read-only sub-agents in parallel — a metrics analyst and a log analyst. Correlates their findings against deploy history, and runs a Python script in the sandbox to produce a structured diagnosis. Proposes `rollback_deployment`. | Sees the evidence and the proposed action. **Approves.** |
+| **1. Investigate** | Reads the incident, then delegates to two read-only sub-agents — a metrics analyst and a log analyst, each on its own thread. Correlates their findings against deploy history, and runs a Python script in the sandbox to produce a structured diagnosis. Proposes `rollback_deployment`. | Sees the evidence and the proposed action. **Approves.** |
 | **2. Verify** | Executes the rollback, re-queries telemetry, confirms latency and error rate are recovering. Proposes `resolve_incident`. | Confirms recovery. **Approves.** |
 | **3. Report** | Summarises root cause, timeline and what was changed. | Done. |
 
@@ -63,7 +63,7 @@ primitive, and removing the harness removes the behaviour:
 |---|---|
 | Tools that read and change a live system | A remote MCP server, registered once and reached over streamable HTTP with a bearer token |
 | A hard stop before anything destructive | `require_approval_for_tools` — the turn ends `done` carrying `tool.approval_required`, and only a `user.tool_approval` input resumes it |
-| Two lines of evidence gathered at once | `dynamic_sub_agents` — the agent delegates a metrics analyst and a log analyst with `create_sub_agent`, each on its own thread |
+| Evidence gathered by more than one agent | `dynamic_sub_agents` — the agent delegates a metrics analyst and a log analyst with `create_sub_agent`, each on its own thread |
 | Analysis the agent writes for itself | The local sandbox: a bubblewrap jail with a fresh Python interpreter, no package access and no route to the network |
 | A record an operator can audit afterwards | The session event log — every call, argument and result, replayed into the timeline |
 | Surviving a reload mid-incident | Session and turn state held by the harness, not in browser memory |
@@ -93,7 +93,7 @@ flowchart LR
     subgraph tf["TrueForge :8790"]
         GATE{{"Approval policy<br/>pauses restart · rollback<br/>scale · resolve"}}
         LOOP["Agent loop"]
-        SUBS["Sub-agents<br/>metrics · log analysts<br/>read-only, in parallel"]
+        SUBS["Sub-agents<br/>metrics · log analysts<br/>read-only, own threads"]
         SB["Sandbox<br/>bwrap"]
         LLM["Gemini 3.5 Flash Lite"]
     end
@@ -156,9 +156,21 @@ sequenceDiagram
 ## The simulated cloud
 
 There is no real infrastructure. `backend/` seeds a Neon Postgres database with five services, two
-hours of per-minute telemetry, deploy history and log lines — including one scripted failure:
-`checkout-api v1.4.2` leaks database connections, so every demo starts with a live SEV-1 that has a
-discoverable root cause.
+hours of per-minute telemetry, deploy history and log lines — and two scripted failures, chosen to
+fail in different ways so the right fix is different too:
+
+| | `INC-0042` · SEV-1 | `INC-0043` · SEV-2 |
+|---|---|---|
+| Service | `checkout-api` | `payments-worker` |
+| Shape | A step change at 15:00 — p95 140 ms → 2,400 ms, errors 0.3% → 8.1% | A drift over 90 minutes — p95 140 ms → 610 ms, CPU 45% → 92% |
+| Errors | 8.1% | **0.6%. Requests are slow, not failing** |
+| Logs | `timeout acquiring connection from pool` | `heap usage 94% of limit, GC pause 1,240ms` |
+| Deploy history | `v1.4.2` shipped three minutes before it broke | Nothing released in 26 hours |
+| Right answer | `rollback_deployment` | `restart_service` |
+
+The second one exists to make the diagnosis falsifiable. An agent that pattern-matches "incident →
+roll back" gets it wrong, and the evidence that says so — a flat error rate and an empty deploy
+window — is exactly what the SOP tells it to look for.
 
 Nine MCP tools sit on top:
 
@@ -285,6 +297,13 @@ price**. Free tiers vary more than you would expect:
 
 TrueForge does not retry on 429, so a single rate-limit ends the turn. If a run stalls, that is
 usually why.
+
+Delegation makes this sharper, because a sub-agent is a whole agent loop with its own model calls.
+The first fan-out run ended on a 429 with the analysts burning three sandbox executions apiece —
+the harness tells sub-agents to prefer sandbox code for mechanical work, which is good advice
+against a generous quota and fatal against fifteen requests a minute. The briefs now say one direct
+tool call each and no code, which is also the honest description of the work: fetch one thing,
+summarise it.
 
 ---
 
@@ -452,8 +471,11 @@ Stated plainly, because a hackathon judge will find them anyway.
   harness on load, so a reload mid-incident recovers the run. There is no banner announcing it.
 - **The Command Room polls, it does not stream.** State is re-read every four seconds rather than
   consuming the harness's SSE feed. Simpler and resume-safe; up to four seconds behind.
-- **One incident scenario.** Checkout rollback, done thoroughly. `restart_service` and
-  `scale_service` are implemented and gated but no seeded incident calls for them.
+- **`scale_service` is never exercised.** It is implemented, gated and audited like the other
+  guarded tools, but neither seeded incident calls for it.
+- **Delegation is not reliably concurrent.** The SOP asks for both `create_sub_agent` calls in one
+  message. The model often issues them one after the other instead, which still gives two analysts
+  on two threads — and two lanes in the timeline — but gathers the evidence in sequence.
 - **Code Mode makes the timeline vary.** The model sometimes reaches MCP tools from inside its
   sandbox script rather than as top-level calls. The run is identical; the timeline shows sandbox
   steps instead of individual read steps.
@@ -472,10 +494,10 @@ Everything the demo depends on is built and running:
 - [x] Live agent loop wired into the UI, with the approval round trip
 - [x] Sandbox verified running agent-written Python under bubblewrap
 - [x] One-click Codespaces environment
-- [x] Sub-agent fan-out: parallel metrics and log analysts, rendered as lanes
+- [x] Sub-agent fan-out: metrics and log analysts on their own threads, rendered as lanes
 - [x] Unit tests on the approval-gate decision logic
-- [x] Twenty of twenty-one review findings fixed; the twenty-first answered
+- [x] Two incident scenarios with different root causes and different right answers
+- [x] Twenty-two of twenty-three review findings fixed; the twenty-third answered
 
-Two things were scoped and deliberately left for after the deadline — integration tests against a
-Postgres service container, and a second incident scenario. Both are in
-[known limitations](#known-limitations) with the reasoning.
+One thing was scoped and deliberately left for after the deadline: integration tests against a
+Postgres service container. It is in [known limitations](#known-limitations) with the reasoning.
