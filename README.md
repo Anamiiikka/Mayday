@@ -416,11 +416,13 @@ fixed before merge rather than filed away. The fix commits are in the history:
 | #4 | Missing transactions, unvalidated tool arguments, audit rows without attribution, `/mcp` auth left unconditional |
 | #5 | Telemetry buckets returned out of order and stripped of their dates |
 | #6 | Approvals not bound to the call they were shown for; rollback able to target an already-rolled-back release; clearance state not persisted; the operator token reachable from the browser |
-| #7 | Two README claims that overstated what the code did |
+| #7 | Three places the README and the code disagreed — including approved-then-refused actions leaving no audit trail at all, because guarded handlers returned before recording anything |
 | #8 | `/mcp` left unauthenticated, which would have made the approval gate bypassable |
 
 The #6 and #8 findings are the ones worth reading the diff for: both were real ways to get past the
-approval gate, and neither was visible from the UI.
+approval gate, and neither was visible from the UI. #7 is worth reading for a different reason —
+review compared this file against the code and found the code wanting, which is how the `refuse()`
+path that audits cleared-but-rejected actions came to exist.
 
 ---
 
