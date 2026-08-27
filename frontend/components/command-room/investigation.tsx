@@ -15,6 +15,7 @@ import {
   type StepKind,
   type TimelineStep,
 } from "@/lib/api";
+import { AgentNote } from "@/components/command-room/report";
 import { Button } from "@/components/ui/button";
 
 const POLL_MS = 4000;
@@ -95,9 +96,7 @@ function Step({ step, index }: { step: TimelineStep; index: number }) {
         </div>
 
         {step.kind === "message" ? (
-          <p className="mt-2 max-w-3xl whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">
-            {step.detail}
-          </p>
+          <AgentNote text={step.detail ?? ""} />
         ) : (
           step.detail && (
             <p className="mt-1.5 max-w-3xl truncate font-mono text-xs text-muted-foreground">
