@@ -100,13 +100,14 @@ export function buildMcpServer(): McpServer {
     "get_service_health",
     {
       description:
-        "Current status of every service with its latest telemetry sample (latency p95, error rate, CPU, RPS).",
+        "Current status of every service with its latest telemetry sample. error_rate_pct is already a percentage: 8.1 means 8.1% of requests failed, 0.4 means 0.4%.",
       annotations: { readOnlyHint: true },
     },
     async () => {
       const result = await pool.query(`
         SELECT s.id, s.status, s.region, s.version, s.replicas,
-               m.ts AS sampled_at, m.latency_p95_ms, m.error_rate, m.cpu_pct, m.rps
+               m.ts AS sampled_at, m.latency_p95_ms,
+               m.error_rate AS error_rate_pct, m.cpu_pct, m.rps
         FROM services s
         LEFT JOIN LATERAL (
           SELECT * FROM metrics WHERE service_id = s.id AND ts <= now() ORDER BY ts DESC LIMIT 1
@@ -121,7 +122,7 @@ export function buildMcpServer(): McpServer {
     "query_metrics",
     {
       description:
-        "Telemetry for one service over a time window, downsampled into 5-minute buckets stamped MM-DD HH:MM (oldest first) so trends are visible at a glance. Set raw=true only when you need per-minute samples for deeper analysis.",
+        "Telemetry for one service over a time window, downsampled into 5-minute buckets stamped MM-DD HH:MM (oldest first) so trends are visible at a glance. error_rate_pct is already a percentage: 8.1 means 8.1% of requests failed, 0.4 means 0.4% — do not multiply it by 100. Set raw=true only when you need per-minute samples for deeper analysis.",
       inputSchema: {
         service: z.string().describe("Service id, e.g. checkout-api"),
         window_minutes: z.number().int().min(1).max(180).default(45),
@@ -135,7 +136,7 @@ export function buildMcpServer(): McpServer {
     async ({ service, window_minutes, raw }) => {
       if (raw) {
         const result = await pool.query(
-          `SELECT ts, latency_p95_ms, error_rate, cpu_pct, rps
+          `SELECT ts, latency_p95_ms, error_rate AS error_rate_pct, cpu_pct, rps
            FROM metrics
            WHERE service_id = $1 AND ts >= now() - ($2 || ' minutes')::interval AND ts <= now()
            ORDER BY ts`,
@@ -146,7 +147,7 @@ export function buildMcpServer(): McpServer {
       const result = await pool.query(
         `SELECT to_char(date_bin('5 minutes', ts, now()), 'MM-DD HH24:MI') AS bucket,
                 round(avg(latency_p95_ms))::int AS latency_p95_ms,
-                round(avg(error_rate)::numeric, 3)::float8 AS error_rate,
+                round(avg(error_rate)::numeric, 3)::float8 AS error_rate_pct,
                 round(avg(cpu_pct))::int AS cpu_pct,
                 round(avg(rps))::int AS rps
          FROM metrics

@@ -39,7 +39,7 @@ A real investigation, end to end, takes three turns and two approvals:
 
 | | The agent | The operator |
 |---|---|---|
-| **1. Investigate** | Reads the incident, then delegates two read-only sub-agents in parallel — a metrics analyst and a log analyst. Correlates their findings against deploy history, and runs a Python script in the sandbox to produce a structured diagnosis. Proposes `rollback_deployment`. | Sees the evidence and the proposed action. **Approves.** |
+| **1. Investigate** | Reads the incident, then delegates to two read-only sub-agents — a metrics analyst and a log analyst, each on its own thread. Correlates their findings against deploy history, and runs a Python script in the sandbox to produce a structured diagnosis. Proposes `rollback_deployment`. | Sees the evidence and the proposed action. **Approves.** |
 | **2. Verify** | Executes the rollback, re-queries telemetry, confirms latency and error rate are recovering. Proposes `resolve_incident`. | Confirms recovery. **Approves.** |
 | **3. Report** | Summarises root cause, timeline and what was changed. | Done. |
 
@@ -63,7 +63,7 @@ primitive, and removing the harness removes the behaviour:
 |---|---|
 | Tools that read and change a live system | A remote MCP server, registered once and reached over streamable HTTP with a bearer token |
 | A hard stop before anything destructive | `require_approval_for_tools` — the turn ends `done` carrying `tool.approval_required`, and only a `user.tool_approval` input resumes it |
-| Two lines of evidence gathered at once | `dynamic_sub_agents` — the agent delegates a metrics analyst and a log analyst with `create_sub_agent`, each on its own thread |
+| Evidence gathered by more than one agent | `dynamic_sub_agents` — the agent delegates a metrics analyst and a log analyst with `create_sub_agent`, each on its own thread |
 | Analysis the agent writes for itself | The local sandbox: a bubblewrap jail with a fresh Python interpreter, no package access and no route to the network |
 | A record an operator can audit afterwards | The session event log — every call, argument and result, replayed into the timeline |
 | Surviving a reload mid-incident | Session and turn state held by the harness, not in browser memory |
@@ -93,7 +93,7 @@ flowchart LR
     subgraph tf["TrueForge :8790"]
         GATE{{"Approval policy<br/>pauses restart · rollback<br/>scale · resolve"}}
         LOOP["Agent loop"]
-        SUBS["Sub-agents<br/>metrics · log analysts<br/>read-only, in parallel"]
+        SUBS["Sub-agents<br/>metrics · log analysts<br/>read-only, own threads"]
         SB["Sandbox<br/>bwrap"]
         LLM["Gemini 3.5 Flash Lite"]
     end
@@ -466,6 +466,9 @@ Stated plainly, because a hackathon judge will find them anyway.
   consuming the harness's SSE feed. Simpler and resume-safe; up to four seconds behind.
 - **`scale_service` is never exercised.** It is implemented, gated and audited like the other
   guarded tools, but neither seeded incident calls for it.
+- **Delegation is not reliably concurrent.** The SOP asks for both `create_sub_agent` calls in one
+  message. The model often issues them one after the other instead, which still gives two analysts
+  on two threads — and two lanes in the timeline — but gathers the evidence in sequence.
 - **Code Mode makes the timeline vary.** The model sometimes reaches MCP tools from inside its
   sandbox script rather than as top-level calls. The run is identical; the timeline shows sandbox
   steps instead of individual read steps.
@@ -484,7 +487,7 @@ Everything the demo depends on is built and running:
 - [x] Live agent loop wired into the UI, with the approval round trip
 - [x] Sandbox verified running agent-written Python under bubblewrap
 - [x] One-click Codespaces environment
-- [x] Sub-agent fan-out: parallel metrics and log analysts, rendered as lanes
+- [x] Sub-agent fan-out: metrics and log analysts on their own threads, rendered as lanes
 - [x] Unit tests on the approval-gate decision logic
 - [x] Two incident scenarios with different root causes and different right answers
 - [x] Twenty-two of twenty-three review findings fixed; the twenty-third answered
