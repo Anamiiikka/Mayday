@@ -214,7 +214,7 @@ export function AgentNote({ text }: { text: string }) {
         </button>
       </div>
       {open && (
-        <div className="max-h-[28rem] overflow-auto px-4 py-4">
+        <div className="px-4 py-4">
           <Markdown source={text} />
         </div>
       )}
