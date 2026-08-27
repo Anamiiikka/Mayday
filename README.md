@@ -156,9 +156,21 @@ sequenceDiagram
 ## The simulated cloud
 
 There is no real infrastructure. `backend/` seeds a Neon Postgres database with five services, two
-hours of per-minute telemetry, deploy history and log lines — including one scripted failure:
-`checkout-api v1.4.2` leaks database connections, so every demo starts with a live SEV-1 that has a
-discoverable root cause.
+hours of per-minute telemetry, deploy history and log lines — and two scripted failures, chosen to
+fail in different ways so the right fix is different too:
+
+| | `INC-0042` · SEV-1 | `INC-0043` · SEV-2 |
+|---|---|---|
+| Service | `checkout-api` | `payments-worker` |
+| Shape | A step change at 15:00 — p95 140 ms → 2,400 ms, errors 0.3% → 8.1% | A drift over 90 minutes — p95 140 ms → 610 ms, CPU 45% → 92% |
+| Errors | 8.1% | **0.6%. Requests are slow, not failing** |
+| Logs | `timeout acquiring connection from pool` | `heap usage 94% of limit, GC pause 1,240ms` |
+| Deploy history | `v1.4.2` shipped three minutes before it broke | Nothing released in 26 hours |
+| Right answer | `rollback_deployment` | `restart_service` |
+
+The second one exists to make the diagnosis falsifiable. An agent that pattern-matches "incident →
+roll back" gets it wrong, and the evidence that says so — a flat error rate and an empty deploy
+window — is exactly what the SOP tells it to look for.
 
 Nine MCP tools sit on top:
 
@@ -452,8 +464,8 @@ Stated plainly, because a hackathon judge will find them anyway.
   harness on load, so a reload mid-incident recovers the run. There is no banner announcing it.
 - **The Command Room polls, it does not stream.** State is re-read every four seconds rather than
   consuming the harness's SSE feed. Simpler and resume-safe; up to four seconds behind.
-- **One incident scenario.** Checkout rollback, done thoroughly. `restart_service` and
-  `scale_service` are implemented and gated but no seeded incident calls for them.
+- **`scale_service` is never exercised.** It is implemented, gated and audited like the other
+  guarded tools, but neither seeded incident calls for it.
 - **Code Mode makes the timeline vary.** The model sometimes reaches MCP tools from inside its
   sandbox script rather than as top-level calls. The run is identical; the timeline shows sandbox
   steps instead of individual read steps.
@@ -474,8 +486,8 @@ Everything the demo depends on is built and running:
 - [x] One-click Codespaces environment
 - [x] Sub-agent fan-out: parallel metrics and log analysts, rendered as lanes
 - [x] Unit tests on the approval-gate decision logic
-- [x] Twenty of twenty-one review findings fixed; the twenty-first answered
+- [x] Two incident scenarios with different root causes and different right answers
+- [x] Twenty-two of twenty-three review findings fixed; the twenty-third answered
 
-Two things were scoped and deliberately left for after the deadline — integration tests against a
-Postgres service container, and a second incident scenario. Both are in
-[known limitations](#known-limitations) with the reasoning.
+One thing was scoped and deliberately left for after the deadline: integration tests against a
+Postgres service container. It is in [known limitations](#known-limitations) with the reasoning.
