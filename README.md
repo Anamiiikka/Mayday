@@ -25,9 +25,9 @@ you can see exactly what it intends to do, and why, before it does it.
 [Choosing a model](#choosing-a-model) ·
 [Repository](#repository) ·
 [Safety model](#safety-model) ·
-[Why it is built this way](#why-it-is-built-this-way) ·
+[Design decisions](#design-decisions) ·
 [How this is known to work](#how-this-is-known-to-work) ·
-[What it does not do](#what-it-does-not-do) ·
+[Known limitations](#known-limitations) ·
 [Status](#status)
 
 ---
@@ -327,7 +327,7 @@ No secrets are committed. Everything sensitive lives in `.env` files that are gi
 
 ---
 
-## Why it is built this way
+## Design decisions
 
 - **The simulated cloud is a real database, not a stub.** Five services, two hours of per-minute
   telemetry and a deploy history live in Postgres, so the agent has to *find* the root cause rather
@@ -402,7 +402,7 @@ cd backend && npm test     # 20 tests, no database required
 ```
 
 The database-backed tool paths themselves are covered by the end-to-end run rather than by unit
-tests — see [what it does not do](#what-it-does-not-do).
+tests — see [known limitations](#known-limitations).
 
 ### What review caught that we did not
 
@@ -424,7 +424,7 @@ approval gate, and neither was visible from the UI.
 
 ---
 
-## What it does not do
+## Known limitations
 
 Stated plainly, because a hackathon judge will find them anyway.
 
