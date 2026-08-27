@@ -7,24 +7,29 @@ cd "$(dirname "$0")/.."
 LOCAL_DB="postgres://mayday:mayday@localhost:5432/mayday"
 
 echo "==> Sandbox host dependencies"
-sudo bash scripts/setup-sandbox-host.sh
+sudo -n bash scripts/setup-sandbox-host.sh
 
 echo "==> TrueForge harness"
-sudo npm install -g @truefoundry/trueforge
+sudo -n npm install -g @truefoundry/trueforge
 
 if [[ -n "${NEON_DATABASE_URL:-}" ]]; then
   echo "==> Using the Neon database from the NEON_DATABASE_URL secret"
   DB_URL="$NEON_DATABASE_URL"
 else
   echo "==> No NEON_DATABASE_URL secret; installing a local Postgres instead"
-  sudo apt-get install -y -qq postgresql
-  sudo service postgresql start
-  # Both statements are idempotent so a rebuild does not fail here.
-  sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='mayday'" \
-    | grep -q 1 || sudo -u postgres psql -q \
-      -c "CREATE ROLE mayday LOGIN PASSWORD 'mayday' SUPERUSER"
-  sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='mayday'" \
-    | grep -q 1 || sudo -u postgres createdb -O mayday mayday
+  sudo -n apt-get install -y -qq postgresql
+  sudo -n service postgresql start
+
+  # Codespaces grants this user passwordless sudo for root only, so
+  # `sudo -u postgres` would sit on a password prompt forever. Go via root.
+  as_postgres() { sudo -n su postgres -c "$1"; }
+  exists() { as_postgres "psql -tAc \"$1\"" | grep -q 1; }
+
+  # Both checks are idempotent so a rebuild does not fail here.
+  exists "SELECT 1 FROM pg_roles WHERE rolname='mayday'" ||
+    as_postgres "psql -q -c \"CREATE ROLE mayday LOGIN PASSWORD 'mayday' SUPERUSER\""
+  exists "SELECT 1 FROM pg_database WHERE datname='mayday'" ||
+    as_postgres "createdb -O mayday mayday"
   DB_URL="$LOCAL_DB"
 fi
 

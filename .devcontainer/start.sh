@@ -20,10 +20,9 @@ wait_for() {
   return 1
 }
 
-if ! sudo service postgresql status >/dev/null 2>&1; then
-  # Only present when the codespace fell back to a local database.
-  sudo service postgresql start >/dev/null 2>&1 || true
-fi
+# Only present when the codespace fell back to a local database. Starting an
+# already-running cluster is a no-op, so this needs no guard.
+sudo -n service postgresql start >/dev/null 2>&1 || true
 
 echo "==> Seeding the fake cloud"
 # Telemetry is written relative to now(), so every start gets fresh data and
