@@ -201,17 +201,19 @@ share `localhost`; without it the harness cannot reach the backend.
 
 ```bash
 # a model provider — free tiers differ wildly, see below
-curl -X POST http://localhost:8790/api/v1/settings/model-providers \
+curl -X PUT http://localhost:8790/api/v1/settings/model-providers \
   -H 'Content-Type: application/json' \
   -d '{"manifest":{"type":"google-gemini","auth":{"api_key":"YOUR_KEY"},
        "models":[{"model_id":"gemini-3.5-flash-lite","name":"gemini-3-5-flash-lite",
        "properties":{"context_length":1048576,"max_output_tokens":65536}}]}}'
 
-# the fake cloud
-curl -X POST http://localhost:8790/api/v1/settings/mcp-servers \
+# the fake cloud — the bearer token must match MCP_TOKEN in backend/.env, or
+# anything that can reach port 4000 could invoke a destructive tool directly
+curl -X PUT http://localhost:8790/api/v1/settings/mcp-servers \
   -H 'Content-Type: application/json' \
   -d '{"manifest":{"type":"remote","name":"mayday-fake-cloud","url":"http://localhost:4000/mcp",
-       "description":"Mayday simulated cloud: read-only telemetry and approval-gated actions."}}'
+       "description":"Mayday simulated cloud: read-only telemetry and approval-gated actions.",
+       "auth":{"type":"header","headers":{"Authorization":"Bearer YOUR_MCP_TOKEN"}}}}'
 
 # the agent
 curl -X POST http://localhost:8790/api/v1/agents \
