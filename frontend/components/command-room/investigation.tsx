@@ -15,6 +15,7 @@ import {
   type StepKind,
   type TimelineStep,
 } from "@/lib/api";
+import { AgentNote } from "@/components/command-room/report";
 import { Button } from "@/components/ui/button";
 
 const POLL_MS = 4000;
@@ -27,6 +28,7 @@ const KIND_STYLE: Record<StepKind, { tag: string; className: string }> = {
   guarded: { tag: "NEEDS CLEARANCE", className: "border-primary/50 text-primary" },
   harness: { tag: "HARNESS", className: "border-border text-muted-foreground" },
   message: { tag: "FINDING", className: "border-phosphor/40 text-phosphor" },
+  subagent: { tag: "DELEGATED", className: "border-amber/40 text-amber" },
 };
 
 const AGENT_STATE_LABEL: Record<AgentState["status"], string> = {
@@ -63,7 +65,13 @@ function Step({ step, index }: { step: TimelineStep; index: number }) {
   const expandable = Boolean(step.result || (step.detail && step.kind !== "message"));
 
   return (
-    <li className="relative border-l border-border pl-6">
+    <li
+      className={`relative border-l border-border pl-6 ${
+        // Work a sub-agent did sits in its own track, so an operator can see at
+        // a glance which findings came back in parallel.
+        step.lane ? "ml-6 border-l-amber/30" : ""
+      }`}
+    >
       <span
         className={`absolute -left-[5px] top-2 size-2.5 rounded-full border-2 border-background ${
           step.failed
@@ -72,7 +80,9 @@ function Step({ step, index }: { step: TimelineStep; index: number }) {
               ? "bg-primary"
               : step.kind === "message"
                 ? "bg-phosphor"
-                : "bg-muted-foreground"
+                : step.kind === "subagent"
+                  ? "bg-amber"
+                  : "bg-muted-foreground"
         }`}
         aria-hidden
       />
@@ -82,6 +92,11 @@ function Step({ step, index }: { step: TimelineStep; index: number }) {
             {String(index + 1).padStart(2, "0")}
           </span>
           <span className="font-medium">{step.label}</span>
+          {step.lane && (
+            <span className="font-mono text-[9px] tracking-widest text-amber/80">
+              PARALLEL LANE
+            </span>
+          )}
           <span
             className={`rounded-sm border px-1.5 py-0.5 font-mono text-[9px] tracking-widest ${style.className}`}
           >
@@ -95,9 +110,7 @@ function Step({ step, index }: { step: TimelineStep; index: number }) {
         </div>
 
         {step.kind === "message" ? (
-          <p className="mt-2 max-w-3xl whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">
-            {step.detail}
-          </p>
+          <AgentNote text={step.detail ?? ""} />
         ) : (
           step.detail && (
             <p className="mt-1.5 max-w-3xl truncate font-mono text-xs text-muted-foreground">

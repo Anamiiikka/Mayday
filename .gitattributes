@@ -1,0 +1,2 @@
+# Shell scripts must keep LF endings — a CR breaks bash on Linux hosts.
+*.sh text eol=lf

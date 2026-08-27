@@ -71,7 +71,13 @@ export interface IncidentDetail {
   actions: IncidentAction[];
 }
 
-export type StepKind = "read" | "sandbox" | "guarded" | "harness" | "message";
+export type StepKind =
+  | "read"
+  | "sandbox"
+  | "guarded"
+  | "harness"
+  | "message"
+  | "subagent";
 
 export interface TimelineStep {
   id: string;
@@ -81,6 +87,8 @@ export interface TimelineStep {
   args?: unknown;
   result?: string;
   failed?: boolean;
+  /** Set when the step was performed by a sub-agent, not the main thread. */
+  lane?: string;
   at: string;
 }
 
