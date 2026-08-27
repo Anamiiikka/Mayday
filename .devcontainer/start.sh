@@ -61,7 +61,10 @@ register() {
     echo "    registered $what"
   else
     echo "    $what not registered (HTTP $code) — already present, or:"
+    # The response body carries no trailing newline; without one it runs into
+    # whatever the next step prints.
     sed 's/^/      /' "$LOGS/$what.json"
+    echo
   fi
 }
 
