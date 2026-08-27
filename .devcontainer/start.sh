@@ -44,7 +44,10 @@ else
   echo "==> Starting TrueForge on :8790"
   # Installed globally at setup; npx is the fallback if that ever fails.
   harness=$(command -v trueforge || echo "npx -y @truefoundry/trueforge")
-  SERVER_EXECUTION_TIMEOUT_SECONDS=1800 nohup $harness >"$LOGS/trueforge.log" 2>&1 &
+  # Run it out of its own directory so its state never lands in the worktree.
+  mkdir -p "$HOME/.mayday-harness"
+  (cd "$HOME/.mayday-harness" &&
+   SERVER_EXECUTION_TIMEOUT_SECONDS=1800 nohup $harness >"$LOGS/trueforge.log" 2>&1 &)
   wait_for http://localhost:8790/api/v1/agents trueforge 90
 fi
 
