@@ -406,23 +406,31 @@ tests — see [known limitations](#known-limitations).
 
 ### What review caught that we did not
 
-Every change went through a pull request reviewed by [Qodo](https://qodo.ai), and the findings were
-fixed before merge rather than filed away. The fix commits are in the history:
+Every change went through a pull request reviewed by [Qodo](https://qodo.ai) before merging.
+**Twenty-one findings across seven pull requests**, all fixed before merge except one dismissed on
+purpose. The fix commits are in the history under `Address review:`.
 
-| PR | What review caught |
-|---|---|
-| #2 | Font loading: static weights where a variable axis was intended |
-| #3 | A dead `/command-room` route that should redirect to the embedded section |
-| #4 | Missing transactions, unvalidated tool arguments, audit rows without attribution, `/mcp` auth left unconditional |
-| #5 | Telemetry buckets returned out of order and stripped of their dates |
-| #6 | Approvals not bound to the call they were shown for; rollback able to target an already-rolled-back release; clearance state not persisted; the operator token reachable from the browser |
-| #7 | Three places the README and the code disagreed — including approved-then-refused actions leaving no audit trail at all, because guarded handlers returned before recording anything |
-| #8 | `/mcp` left unauthenticated, which would have made the approval gate bypassable |
+| PR | Found | What review caught |
+|---|---|---|
+| [#2](https://github.com/Anamiiikka/Mayday/pull/2) | 1 | Static font weights loaded where a variable axis was intended |
+| [#3](https://github.com/Anamiiikka/Mayday/pull/3) | 1 | Folding the dashboard into the landing page deleted `/command-room` outright, 404-ing every existing link. Now redirects to the embedded section |
+| [#4](https://github.com/Anamiiikka/Mayday/pull/4) | 8 | The heaviest round, and all of it in the tools: mutations and the seed were non-atomic, so a late failure left the fake cloud half-changed; `restart_service` and `resolve_incident` reported success for services and incidents that did not exist; `rollback_deployment` accepted any version string and activated it unchecked; audit rows attached to the wrong incident; `/mcp` was reachable without auth |
+| [#5](https://github.com/Anamiiikka/Mayday/pull/5) | 2 | Telemetry was ordered by a *formatted clock string*, so buckets and log ranges crossing midnight came back reversed and undated. The agent would have read the sequence backwards and diagnosed from it |
+| [#6](https://github.com/Anamiiikka/Mayday/pull/6) | 5 | Two rounds. Rollback could reinstate the release just backed out of; the agent, approval and reset routes were callable with no token at all; a backend outage rendered as a permanent 404 instead of something retryable; approval state was never written back, so the incident feed showed "Investigating" while a decision sat waiting |
+| [#7](https://github.com/Anamiiikka/Mayday/pull/7) | 3 | Three places this README and the code disagreed — including approved-then-refused actions leaving no audit trail at all, because guarded handlers returned before recording anything |
+| [#8](https://github.com/Anamiiikka/Mayday/pull/8) | 1 | The codespace generated an empty `MCP_TOKEN`, leaving `/mcp` unauthenticated and the approval gate bypassable by anything that could reach the port |
 
-The #6 and #8 findings are the ones worth reading the diff for: both were real ways to get past the
-approval gate, and neither was visible from the UI. #7 is worth reading for a different reason —
-review compared this file against the code and found the code wanting, which is how the `refuse()`
-path that audits cleared-but-rejected actions came to exist.
+Four of these were ways past the approval gate — #4's unauthenticated `/mcp`, #6's untokened
+approval route and its rollback target, and #8 — and none of them were visible from the UI.
+
+#7 is worth reading for a different reason: review compared this file against the code and found
+the code wanting, which is how the `refuse()` path that audits cleared-but-rejected actions came to
+exist.
+
+One finding was **dismissed rather than fixed**: #6 flagged that the sandbox setup script points
+`pip` at staged wheels host-wide. That is true, and it is the only way the sandboxed `pip` can
+resolve anything, because it does not inherit environment variables. The script backs up whatever
+config was there, `--revert` restores it, and the header says so before you run it.
 
 ---
 
