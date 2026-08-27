@@ -27,6 +27,7 @@ you can see exactly what it intends to do, and why, before it does it.
 [Safety model](#safety-model) ·
 [Design decisions](#design-decisions) ·
 [How this is known to work](#how-this-is-known-to-work) ·
+[Qodo code review evidence](#qodo-code-review-evidence) ·
 [Known limitations](#known-limitations) ·
 [Status](#status)
 
@@ -370,8 +371,9 @@ No secrets are committed. Everything sensitive lives in `.env` files that are gi
 
 ## How this is known to work
 
-Three things stand between a plausible-looking agent and one you would let near production: what
-runs on every change, what the tests pin down, and what someone else caught that we did not.
+Two things run before anything merges: the checks on every pull request, and the tests that pin
+down the logic the approval gate depends on. What someone else caught is
+[its own section](#qodo-code-review-evidence).
 
 ### On every pull request
 
@@ -404,11 +406,13 @@ cd backend && npm test     # 20 tests, no database required
 The database-backed tool paths themselves are covered by the end-to-end run rather than by unit
 tests — see [known limitations](#known-limitations).
 
-### What review caught that we did not
+---
 
-Every change went through a pull request reviewed by [Qodo](https://qodo.ai) before merging.
-**Twenty-one findings across seven pull requests**, all fixed before merge except one dismissed on
-purpose. The fix commits are in the history under `Address review:`.
+## Qodo code review evidence
+
+Every change went through a pull request reviewed by [Qodo](https://qodo.ai) before merging, per the
+hackathon's code-review requirement. **Twenty-one findings across seven pull requests**, all fixed
+before merge except one dismissed on purpose. The fix commits are in the history under `Address review:`.
 
 | PR | Found | What review caught |
 |---|---|---|
