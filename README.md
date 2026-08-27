@@ -298,6 +298,13 @@ price**. Free tiers vary more than you would expect:
 TrueForge does not retry on 429, so a single rate-limit ends the turn. If a run stalls, that is
 usually why.
 
+Delegation makes this sharper, because a sub-agent is a whole agent loop with its own model calls.
+The first fan-out run ended on a 429 with the analysts burning three sandbox executions apiece —
+the harness tells sub-agents to prefer sandbox code for mechanical work, which is good advice
+against a generous quota and fatal against fifteen requests a minute. The briefs now say one direct
+tool call each and no code, which is also the honest description of the work: fetch one thing,
+summarise it.
+
 ---
 
 ## Repository
