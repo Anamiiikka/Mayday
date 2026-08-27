@@ -461,6 +461,8 @@ Stated plainly, because a hackathon judge will find them anyway.
 
 ## Status
 
+Everything the demo depends on is built and running:
+
 - [x] Landing page and Command Room
 - [x] Simulated cloud: schema, seed, nine MCP tools
 - [x] TrueForge agent: SOP, gated tools, sandbox
@@ -469,6 +471,8 @@ Stated plainly, because a hackathon judge will find them anyway.
 - [x] One-click Codespaces environment
 - [x] Sub-agent fan-out: parallel metrics and log analysts, rendered as lanes
 - [x] Unit tests on the approval-gate decision logic
-- [x] All review findings cleared
-- [ ] Integration tests against a Postgres service container
-- [ ] Second incident scenario
+- [x] Twenty of twenty-one review findings fixed; the twenty-first answered
+
+Two things were scoped and deliberately left for after the deadline — integration tests against a
+Postgres service container, and a second incident scenario. Both are in
+[known limitations](#known-limitations) with the reasoning.
