@@ -1,0 +1,41 @@
+{
+  "name": "Mayday",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+
+  // TrueForge isolates agent code with bubblewrap, which needs unprivileged
+  // user namespaces. Codespaces allows them; most managed container platforms
+  // do not. scripts/setup-sandbox-host.sh has the two-command host check.
+  "hostRequirements": { "cpus": 2, "memory": "8gb" },
+
+  "forwardPorts": [3000, 4000, 8790],
+  "portsAttributes": {
+    "3000": { "label": "Command Room", "onAutoForward": "openBrowser" },
+    "4000": { "label": "Mayday backend", "onAutoForward": "silent" },
+    "8790": { "label": "TrueForge harness", "onAutoForward": "silent" }
+  },
+
+  // Set these when you create the codespace. Without a model key the stack
+  // still boots — you just cannot dispatch the agent until one is registered.
+  "secrets": {
+    "GEMINI_API_KEY": {
+      "description": "Google AI Studio key. The free tier is enough for the demo.",
+      "documentationUrl": "https://aistudio.google.com/apikey"
+    },
+    "NEON_DATABASE_URL": {
+      "description": "Optional. Leave blank and a local Postgres is used instead.",
+      "documentationUrl": "https://neon.tech"
+    }
+  },
+
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "bash .devcontainer/start.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "bradlc.vscode-tailwindcss"
+      ]
+    }
+  }
+}

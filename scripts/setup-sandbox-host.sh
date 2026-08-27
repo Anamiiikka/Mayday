@@ -1,32 +1,40 @@
 #!/usr/bin/env bash
-# Prepare a WSL Ubuntu host to run TrueForge with a working local sandbox.
+# Prepare a Linux host to run TrueForge with a working local sandbox.
 #
-# Run as root inside WSL:  sudo bash scripts/setup-wsl-sandbox.sh
+# Run as root:  sudo bash scripts/setup-sandbox-host.sh
 #
-# TrueForge's local sandbox provider is Linux/macOS only, so on Windows the
-# harness has to run inside WSL. Three things have to be true before the
-# sandbox can execute a single line of agent-written code:
+# TrueForge isolates agent-written code with bubblewrap, so the host needs a
+# kernel that lets an unprivileged process create user and mount namespaces.
+# That rules out Windows (use WSL2) and most managed container platforms, whose
+# seccomp profiles deny CLONE_NEWUSER. Verified working: WSL2 Ubuntu, GitHub
+# Codespaces, and any VM you have root on. Check a candidate host in seconds:
+#
+#     unshare -Ur echo ok
+#     bwrap --unshare-all --ro-bind / / --dev /dev echo ok
+#
+# Two "ok"s and this script will finish the job. It fixes three things that
+# each stop the sandbox before it executes a single line of agent code:
 #
 #   1. bwrap, socat and rg must be on PATH — the sandbox runtime shells out
 #      to them to build the isolation.
-#   2. python3-venv must be installed. Ubuntu ships python3 without ensurepip,
-#      so the sandbox fails at "virtual environment was not created
+#   2. python3-venv must be installed. Debian and Ubuntu ship python3 without
+#      ensurepip, so the sandbox fails at "virtual environment was not created
 #      successfully" before it ever reaches your code.
 #   3. pip must be able to install pydantic into that venv *without network
-#      access*. The sandbox routes egress through a filtering proxy that does
-#      not work under WSL, so every install attempt dies on ProxyError. We
-#      stage the wheels in /usr/local/share (one of the few paths the sandbox
-#      is allowed to read) and point pip at them with no-index, so the install
-#      resolves locally and never touches the proxy.
+#      access*. The sandbox routes egress through a filtering proxy that is not
+#      reliably reachable off a plain host. We stage the wheels in
+#      /usr/local/share (one of the few paths the sandbox is allowed to read)
+#      and point pip at them with no-index, so the install resolves locally and
+#      never touches the proxy.
 #
 # Step 3 has to be a global pip config: the sandboxed pip does not inherit
 # environment variables, so PIP_CONFIG_FILE and PIP_NO_INDEX have no effect on
 # it. That makes this host-wide, so the script backs up whatever was there and
 # `--revert` puts it back:
 #
-#     sudo bash scripts/setup-wsl-sandbox.sh --revert
+#     sudo bash scripts/setup-sandbox-host.sh --revert
 #
-# Use a WSL instance you are happy to dedicate to the demo.
+# Use a machine you are happy to dedicate to the demo.
 set -euo pipefail
 
 WHEELS=/usr/local/share/tf-wheels
@@ -78,16 +86,14 @@ cat <<'EOF'
 Done.
 
 NOTE: pip on this host now installs only from the staged wheel directory, so
-other Python work in this WSL instance will not reach the package index until
-you run this script with --revert.
+other Python work here will not reach the package index until you run this
+script with --revert.
 
 Start the harness with:
 
     SERVER_EXECUTION_TIMEOUT_SECONDS=1800 npx @truefoundry/trueforge
 
-Then point the MCP server at the backend. WSL cannot reach the Windows host on
-localhost, so use the host address from `ip route show default`, for example:
-
-    http://172.25.208.1:4000/mcp
-
+If the harness and the backend are on different hosts (WSL reaching a Windows
+backend, say), point the MCP server at the reachable address rather than
+localhost — `ip route show default` gives you the gateway.
 EOF

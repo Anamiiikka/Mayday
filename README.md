@@ -143,9 +143,26 @@ already approved it.
 
 ## Running it
 
-**You will need:** Node 22+, a [Neon](https://neon.tech) database (free tier), a
-[Google AI Studio](https://aistudio.google.com/apikey) key (free tier), and — on Windows — WSL2,
-because TrueForge's sandbox is Linux-only.
+### The short way: one click
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Anamiiikka/Mayday)
+
+A codespace builds the whole stack — sandbox dependencies, a database, the harness, and the
+Command Room — and starts it for you. Paste a [Google AI Studio](https://aistudio.google.com/apikey)
+key into the `GEMINI_API_KEY` secret when you create it; leave `NEON_DATABASE_URL` blank and a
+local Postgres is used instead. When the build finishes, open port 3000 from the Ports tab.
+
+This is not a convenience shortcut around a hard setup — it is the only environment we can promise
+in advance, because TrueForge's sandbox needs unprivileged user namespaces and most managed
+container platforms deny them. Codespaces allows them; so does any VM you have root on.
+
+Everything below is the same stack, assembled by hand.
+
+### You will need
+
+Node 22+, a [Neon](https://neon.tech) database (free tier), a
+[Google AI Studio](https://aistudio.google.com/apikey) key (free tier), and a Linux host for the
+harness — on Windows that means WSL2, because TrueForge's sandbox is Linux-only.
 
 ### 1. The simulated cloud
 
@@ -166,7 +183,7 @@ token) before a demo.
 TrueForge needs Linux. On Windows, run it inside WSL:
 
 ```bash
-sudo bash scripts/setup-wsl-sandbox.sh   # sandbox deps + offline pip wheels
+sudo bash scripts/setup-sandbox-host.sh  # sandbox deps + offline pip wheels
 SERVER_EXECUTION_TIMEOUT_SECONDS=1800 npx @truefoundry/trueforge
 ```
 
