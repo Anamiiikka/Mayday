@@ -5,6 +5,20 @@ import { pool } from "./db.js";
 import { insertRecovery } from "./fake-cloud.js";
 import { chooseRollbackTarget } from "./rollback.js";
 
+/**
+ * A tool that rejects a near-miss argument makes the model guess again, and a
+ * guess costs a model call the operator does not have to spare during an
+ * outage. These accept what the agent plausibly sends and normalise it.
+ */
+const optionalEnum = <T extends readonly [string, ...string[]]>(values: T) =>
+  z.preprocess(
+    (value) =>
+      value === null || value === "" || value === "all" || value === "any"
+        ? undefined
+        : value,
+    z.enum(values).optional(),
+  );
+
 function json(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
@@ -164,10 +178,10 @@ export function buildMcpServer(): McpServer {
     "search_logs",
     {
       description:
-        "Log summary for a service: distinct messages grouped by endpoint with counts and first/last occurrence stamped MM-DD HH:MM, newest activity first. Optionally filter by level or a substring.",
+        "Log summary for a service: distinct messages grouped by endpoint with counts and first/last occurrence stamped MM-DD HH:MM, newest activity first. Omit level to see every line — a root cause is often logged as a warning, not an error.",
       inputSchema: {
-        service: z.string(),
-        level: z.enum(["info", "warn", "error"]).optional(),
+        service: z.string().describe("Service id, e.g. payments-worker"),
+        level: optionalEnum(["info", "warn", "error"]),
         query: z.string().optional().describe("Substring to match in the message"),
         limit: z.number().int().min(1).max(50).default(10).describe("Max distinct message groups"),
       },
@@ -214,10 +228,15 @@ export function buildMcpServer(): McpServer {
     "get_incident",
     {
       description: "Details of one incident, including actions taken so far.",
-      inputSchema: { id: z.string().describe("Incident id, e.g. INC-0042") },
+      inputSchema: {
+        id: z.string().optional().describe("Incident id, e.g. INC-0042"),
+        incident_id: z.string().optional().describe("Alias for id."),
+      },
       annotations: { readOnlyHint: true },
     },
-    async ({ id }) => {
+    async (args) => {
+      const id = args.id ?? args.incident_id;
+      if (!id) return toolError("Pass the incident id, e.g. { \"id\": \"INC-0042\" }.");
       const incident = await pool.query("SELECT * FROM incidents WHERE id = $1", [id]);
       const actions = await pool.query(
         "SELECT type, params, executed_at, result FROM actions WHERE incident_id = $1 ORDER BY executed_at",
