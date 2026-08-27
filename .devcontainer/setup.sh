@@ -33,12 +33,17 @@ else
   DB_URL="$LOCAL_DB"
 fi
 
-# One shared operator token, generated once and reused on rebuilds so the two
-# env files can never drift apart.
+# Tokens are generated once and reused on rebuilds, so the two env files can
+# never drift apart and the harness keeps working against an existing
+# registration. OPERATOR_TOKEN guards the agent routes; MCP_TOKEN guards /mcp
+# itself, without which anyone who can reach port 4000 could invoke a
+# destructive tool directly and walk straight past the approval gate.
 if [[ -f backend/.env ]]; then
   OPERATOR_TOKEN="$(grep -E '^OPERATOR_TOKEN=' backend/.env | cut -d= -f2-)"
+  MCP_TOKEN="$(grep -E '^MCP_TOKEN=' backend/.env | cut -d= -f2-)"
 fi
 OPERATOR_TOKEN="${OPERATOR_TOKEN:-$(openssl rand -hex 24)}"
+MCP_TOKEN="${MCP_TOKEN:-$(openssl rand -hex 24)}"
 
 echo "==> Writing env files"
 cat > backend/.env <<ENV
@@ -47,7 +52,7 @@ FRONTEND_ORIGIN=http://localhost:3000
 NEON_DATABASE_URL=$DB_URL
 TRUEFORGE_BASE_URL=http://localhost:8790
 TRUEFORGE_AGENT=incident-responder
-MCP_TOKEN=
+MCP_TOKEN=$MCP_TOKEN
 OPERATOR_TOKEN=$OPERATOR_TOKEN
 ENV
 cat > frontend/.env.local <<ENV

@@ -240,12 +240,15 @@ export async function getAgentState(sessionId: string): Promise<AgentState> {
     for (const action of latest?.state?.required_actions ?? []) {
       if (action.type !== "tool.approval_required") continue;
       for (const call of action.tool_calls ?? []) {
-        const info = callInfo.get(call.id);
-        const args = (info?.args ?? {}) as Record<string, unknown>;
+        // Usually the call is already in the timeline. In Code Mode it is not:
+        // the agent reaches the tool from inside a sandbox script, so the only
+        // description of it is the one carried on the required action itself.
+        const info = callInfo.get(call.id) ?? readCall(call);
+        const args = (info.args ?? {}) as Record<string, unknown>;
         pending = {
           threadId: action.thread_id ?? "main",
           toolCallId: call.id,
-          tool: info?.name ?? "unknown",
+          tool: info.name,
           args,
           reason:
             typeof args.reason === "string"

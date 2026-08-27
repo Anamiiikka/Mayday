@@ -51,11 +51,11 @@ else
 fi
 
 register() {
-  local what=$1 path=$2
-  shift 2
+  local what=$1 method=$2 path=$3
+  shift 3
   local code
   code=$(curl -s -o "$LOGS/$what.json" -w '%{http_code}' \
-    -X POST "http://localhost:8790/api/v1$path" \
+    -X "$method" "http://localhost:8790/api/v1$path" \
     -H 'Content-Type: application/json' "$@")
   if [[ $code == 2* ]]; then
     echo "    registered $what"
@@ -70,7 +70,7 @@ register() {
 
 echo "==> Registering harness configuration"
 if [[ -n "${GEMINI_API_KEY:-}" ]]; then
-  register model-provider /settings/model-providers --data @- <<JSON
+  register model-provider PUT /settings/model-providers --data @- <<JSON
 {"manifest":{"type":"google-gemini","auth":{"api_key":"$GEMINI_API_KEY"},
  "models":[{"model_id":"gemini-3.5-flash-lite","name":"gemini-3-5-flash-lite",
  "properties":{"context_length":1048576,"max_output_tokens":65536}}]}}
@@ -80,12 +80,17 @@ else
   echo "    register a model, or the agent has nothing to think with"
 fi
 
-register mcp-server /settings/mcp-servers --data @- <<'JSON'
+# The backend rejects /mcp without this bearer token, so the harness is the only
+# caller that reaches the tools. Without it anyone who can reach port 4000 could
+# invoke a destructive tool directly and walk straight past the approval gate.
+MCP_TOKEN="$(grep -E '^MCP_TOKEN=' backend/.env | cut -d= -f2-)"
+register mcp-server PUT /settings/mcp-servers --data @- <<JSON
 {"manifest":{"type":"remote","name":"mayday-fake-cloud","url":"http://localhost:4000/mcp",
- "description":"Mayday simulated cloud: read-only telemetry and approval-gated actions."}}
+ "description":"Mayday simulated cloud: read-only telemetry and approval-gated actions.",
+ "auth":{"type":"header","headers":{"Authorization":"Bearer $MCP_TOKEN"}}}}
 JSON
 
-register agent /agents --data-binary @trueforge/agent.json
+register agent POST /agents --data-binary @trueforge/agent.json
 
 if listening http://localhost:3000; then
   echo "==> Command Room already running"
