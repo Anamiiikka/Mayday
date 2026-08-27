@@ -153,8 +153,10 @@ key into the `GEMINI_API_KEY` secret when you create it; leave `NEON_DATABASE_UR
 local Postgres is used instead. When the build finishes, open port 3000 from the Ports tab.
 
 This is not a convenience shortcut around a hard setup — it is the only environment we can promise
-in advance, because TrueForge's sandbox needs unprivileged user namespaces and most managed
-container platforms deny them. Codespaces allows them; so does any VM you have root on.
+in advance. TrueForge's sandbox builds a bubblewrap jail, which needs a user namespace, and the
+default container seccomp profile denies that syscall; the devcontainer asks for `privileged` so
+the codespace can create one. Most managed container platforms will not let you make that request
+at all, which is why there is no Render or Vercel button here for the harness.
 
 Everything below is the same stack, assembled by hand.
 

@@ -6,8 +6,9 @@
 # TrueForge isolates agent-written code with bubblewrap, so the host needs a
 # kernel that lets an unprivileged process create user and mount namespaces.
 # That rules out Windows (use WSL2) and most managed container platforms, whose
-# seccomp profiles deny CLONE_NEWUSER. Verified working: WSL2 Ubuntu, GitHub
-# Codespaces, and any VM you have root on. Check a candidate host in seconds:
+# seccomp profiles deny CLONE_NEWUSER. Verified working: WSL2 Ubuntu, a GitHub
+# codespace running privileged (see .devcontainer/devcontainer.json), and any VM
+# you have root on. Check a candidate host in seconds:
 #
 #     unshare -Ur echo ok
 #     bwrap --unshare-all --ro-bind / / --dev /dev echo ok
