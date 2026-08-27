@@ -17,19 +17,19 @@ you can see exactly what it intends to do, and why, before it does it.
 
 ## Contents
 
-[What a run looks like](#what-a-run-looks-like) ·
-[Where the harness carries the weight](#where-the-harness-carries-the-weight) ·
-[Architecture](#architecture) ·
-[The simulated cloud](#the-simulated-cloud) ·
-[Running it](#running-it) ·
-[Choosing a model](#choosing-a-model) ·
-[Repository](#repository) ·
-[Safety model](#safety-model) ·
-[Design decisions](#design-decisions) ·
-[How this is known to work](#how-this-is-known-to-work) ·
-[Qodo code review evidence](#qodo-code-review-evidence) ·
-[Known limitations](#known-limitations) ·
-[Status](#status)
+- [What a run looks like](#what-a-run-looks-like)
+- [Where the harness carries the weight](#where-the-harness-carries-the-weight)
+- [Architecture](#architecture)
+- [The simulated cloud](#the-simulated-cloud)
+- [Running it](#running-it)
+- [Choosing a model](#choosing-a-model)
+- [Repository](#repository)
+- [Safety model](#safety-model)
+- [Design decisions](#design-decisions)
+- [How this is known to work](#how-this-is-known-to-work)
+- [Qodo code review evidence](#qodo-code-review-evidence)
+- [Known limitations](#known-limitations)
+- [Status](#status)
 
 ---
 
