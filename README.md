@@ -411,7 +411,7 @@ tests — see [known limitations](#known-limitations).
 ## Qodo code review evidence
 
 Every change went through a pull request reviewed by [Qodo](https://qodo.ai) before merging, per the
-hackathon's code-review requirement. **Twenty-one findings across seven pull requests**, all fixed
+hackathon's code-review requirement. **Twenty-three findings across seven pull requests**, all fixed
 before merge except one dismissed on purpose. The fix commits are in the history under `Address review:`.
 
 | PR | Found | What review caught |
@@ -422,10 +422,13 @@ before merge except one dismissed on purpose. The fix commits are in the history
 | [#5](https://github.com/Anamiiikka/Mayday/pull/5) | 2 | Telemetry was ordered by a *formatted clock string*, so buckets and log ranges crossing midnight came back reversed and undated. The agent would have read the sequence backwards and diagnosed from it |
 | [#6](https://github.com/Anamiiikka/Mayday/pull/6) | 5 | Two rounds. Rollback could reinstate the release just backed out of; the agent, approval and reset routes were callable with no token at all; a backend outage rendered as a permanent 404 instead of something retryable; approval state was never written back, so the incident feed showed "Investigating" while a decision sat waiting |
 | [#7](https://github.com/Anamiiikka/Mayday/pull/7) | 3 | Three places this README and the code disagreed — including approved-then-refused actions leaving no audit trail at all, because guarded handlers returned before recording anything |
-| [#8](https://github.com/Anamiiikka/Mayday/pull/8) | 1 | The codespace generated an empty `MCP_TOKEN`, leaving `/mcp` unauthenticated and the approval gate bypassable by anything that could reach the port |
+| [#8](https://github.com/Anamiiikka/Mayday/pull/8) | 3 | The codespace generated an empty `MCP_TOKEN`, leaving `/mcp` unauthenticated and the approval gate bypassable by anything that could reach the port. A second round caught two more: reading a token out of an older `.env` aborted the whole build under `set -e` when the line was not there, and registering the agent with `POST` meant an agent from an earlier run silently kept its old SOP — every later edit ignored, with nothing to show for it |
 
 Four of these were ways past the approval gate — #4's unauthenticated `/mcp`, #6's untokened
-approval route and its rollback target, and #8 — and none of them were visible from the UI.
+approval route and its rollback target, and #8's empty token — and none of them were visible from
+the UI. #8's second round is the other kind worth having: two silent failures, one that would have
+stopped a judge's codespace building and one that would have let it build and then run the wrong
+agent.
 
 #7 is worth reading for a different reason: review compared this file against the code and found
 the code wanting, which is how the `refuse()` path that audits cleared-but-rejected actions came to

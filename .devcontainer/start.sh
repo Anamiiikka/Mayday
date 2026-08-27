@@ -83,14 +83,37 @@ fi
 # The backend rejects /mcp without this bearer token, so the harness is the only
 # caller that reaches the tools. Without it anyone who can reach port 4000 could
 # invoke a destructive tool directly and walk straight past the approval gate.
-MCP_TOKEN="$(grep -E '^MCP_TOKEN=' backend/.env | cut -d= -f2-)"
+MCP_TOKEN="$(grep -E '^MCP_TOKEN=' backend/.env | cut -d= -f2- || true)"
+if [[ -z "$MCP_TOKEN" ]]; then
+  echo "    !! backend/.env has no MCP_TOKEN — /mcp will accept unauthenticated"
+  echo "       calls. Re-run .devcontainer/setup.sh to generate one."
+fi
 register mcp-server PUT /settings/mcp-servers --data @- <<JSON
 {"manifest":{"type":"remote","name":"mayday-fake-cloud","url":"http://localhost:4000/mcp",
  "description":"Mayday simulated cloud: read-only telemetry and approval-gated actions.",
  "auth":{"type":"header","headers":{"Authorization":"Bearer $MCP_TOKEN"}}}}
 JSON
 
-register agent POST /agents --data-binary @trueforge/agent.json
+# POST only ever creates. The SOP changes between runs, so an agent registered
+# earlier would keep an old manifest forever and quietly ignore every later
+# edit — the failure is silent, which is the worst kind. Update in place when it
+# already exists; PUT is keyed by the server's id, not the name, and its body is
+# the manifest alone.
+AGENT_NAME="$(node -p "require('./trueforge/agent.json').name")"
+AGENT_ID="$(curl -s "http://localhost:8790/api/v1/agents" | node -e '
+  let raw = "";
+  process.stdin.on("data", (chunk) => (raw += chunk)).on("end", () => {
+    const rows = JSON.parse(raw || "{}").data ?? [];
+    const found = rows.find((row) => row.name === process.argv[1]);
+    process.stdout.write(found ? found.id : "");
+  });' "$AGENT_NAME" || true)"
+
+if [[ -n "$AGENT_ID" ]]; then
+  node -e "process.stdout.write(JSON.stringify({ manifest: require('./trueforge/agent.json').manifest }))"     > "$LOGS/agent-manifest.json"
+  register agent PUT "/agents/$AGENT_ID" --data-binary @"$LOGS/agent-manifest.json"
+else
+  register agent POST /agents --data-binary @trueforge/agent.json
+fi
 
 if listening http://localhost:3000; then
   echo "==> Command Room already running"

@@ -38,9 +38,11 @@ fi
 # registration. OPERATOR_TOKEN guards the agent routes; MCP_TOKEN guards /mcp
 # itself, without which anyone who can reach port 4000 could invoke a
 # destructive tool directly and walk straight past the approval gate.
+# `|| true` matters: under `set -e` a grep that matches nothing would abort the
+# build, and an .env written before MCP_TOKEN existed has no line to match.
 if [[ -f backend/.env ]]; then
-  OPERATOR_TOKEN="$(grep -E '^OPERATOR_TOKEN=' backend/.env | cut -d= -f2-)"
-  MCP_TOKEN="$(grep -E '^MCP_TOKEN=' backend/.env | cut -d= -f2-)"
+  OPERATOR_TOKEN="$(grep -E '^OPERATOR_TOKEN=' backend/.env | cut -d= -f2- || true)"
+  MCP_TOKEN="$(grep -E '^MCP_TOKEN=' backend/.env | cut -d= -f2- || true)"
 fi
 OPERATOR_TOKEN="${OPERATOR_TOKEN:-$(openssl rand -hex 24)}"
 MCP_TOKEN="${MCP_TOKEN:-$(openssl rand -hex 24)}"
