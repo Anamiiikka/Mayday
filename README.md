@@ -15,6 +15,24 @@ you can see exactly what it intends to do, and why, before it does it.
 
 ---
 
+## Contents
+
+[What a run looks like](#what-a-run-looks-like) ·
+[Why TrueForge is central](#why-trueforge-is-central) ·
+[Architecture](#architecture) ·
+[The simulated cloud](#the-simulated-cloud) ·
+[Running it](#running-it) ·
+[Choosing a model](#choosing-a-model) ·
+[Repository](#repository) ·
+[Safety model](#safety-model) ·
+[Design decisions](#design-decisions) ·
+[Testing and CI](#testing-and-ci) ·
+[Code review](#code-review) ·
+[Known limitations](#known-limitations) ·
+[Status](#status)
+
+---
+
 ## What a run looks like
 
 A real investigation, end to end, takes three turns and two approvals:
@@ -33,6 +51,24 @@ From an actual run against the seeded scenario:
 > repeated `timeout acquiring connection from pool (5000ms exceeded)`.
 
 After the approved rollback: `checkout-api` healthy on v1.4.1, **p95 217ms, errors 0.2%**.
+
+---
+
+## Why TrueForge is central
+
+Mayday is not an LLM with a dashboard bolted on. Each of its defining behaviours is a harness
+primitive, and removing the harness removes the behaviour:
+
+| What Mayday needs | The TrueForge primitive that provides it |
+|---|---|
+| Tools that read and change a live system | A remote MCP server, registered once and reached over streamable HTTP with a bearer token |
+| A hard stop before anything destructive | `require_approval_for_tools` — the turn ends `done` carrying `tool.approval_required`, and only a `user.tool_approval` input resumes it |
+| Analysis the agent writes for itself | The local sandbox: a bubblewrap jail with a fresh Python interpreter, no package access and no route to the network |
+| A record an operator can audit afterwards | The session event log — every call, argument and result, replayed into the timeline |
+| Surviving a reload mid-incident | Session and turn state held by the harness, not in browser memory |
+
+The pause in the middle of a Mayday run is the harness's pause. We do not implement it, intercept
+it, or simulate it — we render it and hand the decision to a person.
 
 ---
 
@@ -254,7 +290,8 @@ usually why.
 backend/     Express: fake-cloud MCP server, Neon access, TrueForge proxy
 frontend/    Next.js: landing page, Command Room, approval console
 trueforge/   agent.json — instructions, gated tools, sandbox config
-scripts/     WSL sandbox setup
+scripts/     sandbox host setup (bubblewrap deps, offline pip wheels)
+.devcontainer/  one-click Codespaces environment
 ```
 
 No secrets are committed. Everything sensitive lives in `.env` files that are gitignored; the
@@ -277,3 +314,110 @@ No secrets are committed. Everything sensitive lives in `.env` files that are gi
 - **Everything is audited.** Every approved action is written to `actions` with its reason and
   outcome, and shown in the incident's history — including ones that were cleared and then refused
   by validation, which are recorded as `refused: <why>` rather than vanishing.
+
+---
+
+## Design decisions
+
+- **The simulated cloud is a real database, not a stub.** Five services, two hours of per-minute
+  telemetry and a deploy history live in Postgres, so the agent has to *find* the root cause rather
+  than be handed it. It also means the guarded tools do genuine transactional work.
+- **Read tools return summaries, not rows.** `query_metrics` buckets and aggregates rather than
+  returning 120 samples. Raw telemetry filled the context window and left the model less room to
+  reason, not more.
+- **The approval gate is the harness's, not ours.** We could have gated writes in the Express
+  layer. Doing it in `require_approval_for_tools` means the agent loop itself is suspended — there
+  is no code path where the tool runs and we decline to show it.
+- **The operator token never reaches the browser.** It lives in a `server-only` module; the
+  Command Room's route handlers attach it. The backend refuses the agent routes outright when it is
+  unset, because a gate anything on the network can satisfy is not a gate.
+- **`/mcp` requires its own bearer token.** The approval gate lives in the harness, so an
+  unauthenticated MCP endpoint would let anything that could reach the port call
+  `rollback_deployment` directly and walk straight around it.
+- **Telemetry is seeded relative to `now()`.** A fixed timestamp would mean an empty chart the next
+  morning, so every start reseeds and the demo incident is always fifteen minutes old.
+- **Rollback defaults to the newest release that has not itself been rolled back**, so backing out
+  twice cannot reinstate the release you just backed out of. An explicitly named version is honoured
+  as given — that is a deliberate instruction from someone who already approved it.
+- **Actions that are approved and then refused by validation are still audited**, recorded as
+  `refused: <why>` rather than vanishing. An approval that produced nothing is exactly the thing an
+  operator needs to see afterwards.
+- **One scenario, finished.** A second incident type was scoped and dropped in favour of making the
+  checkout rollback work end to end, including recovery telemetry the agent can actually read back.
+- **The model was chosen on rate limits, not benchmarks.** An investigation is 10–20 calls; see
+  [Choosing a model](#choosing-a-model).
+- **The codespace is the deployment.** The sandbox needs a container that may create user
+  namespaces, which managed platforms deny, so the repo ships the environment instead of a URL.
+
+---
+
+## Testing and CI
+
+GitHub Actions runs on every pull request:
+
+| Job | What it does |
+|---|---|
+| `frontend` | `eslint` and a production `next build` |
+| `backend` | `tsc --noEmit` across the MCP server, proxy and seed |
+
+**There is no unit-test suite.** Verification is the end-to-end run — seed, investigate, approve,
+verify recovery, resolve — reproduced in both WSL2 and a fresh codespace, with the database checked
+afterwards for the version flip, the recovery curve and both audit rows. That is honest coverage of
+the demo path and thin coverage of everything else; see [Known limitations](#known-limitations).
+
+---
+
+## Code review
+
+Every change went through a pull request reviewed by [Qodo](https://qodo.ai), and the findings were
+fixed before merge rather than filed away. The fix commits are in the history:
+
+| PR | What review caught |
+|---|---|
+| #2 | Font loading: static weights where a variable axis was intended |
+| #3 | A dead `/command-room` route that should redirect to the embedded section |
+| #4 | Missing transactions, unvalidated tool arguments, audit rows without attribution, `/mcp` auth left unconditional |
+| #5 | Telemetry buckets returned out of order and stripped of their dates |
+| #6 | Approvals not bound to the call they were shown for; rollback able to target an already-rolled-back release; clearance state not persisted; the operator token reachable from the browser |
+| #7 | Two README claims that overstated what the code did |
+| #8 | `/mcp` left unauthenticated, which would have made the approval gate bypassable |
+
+The #6 and #8 findings are the ones worth reading the diff for: both were real ways to get past the
+approval gate, and neither was visible from the UI.
+
+---
+
+## Known limitations
+
+Stated plainly, because a hackathon judge will find them anyway.
+
+- **No unit tests.** The end-to-end run is verified; individual tool functions are not.
+- **No sub-agents.** `dynamic_sub_agents` is enabled in the agent config, but the SOP does not fan
+  out — one agent does the whole investigation. The parallel metrics/log analyst lanes were designed
+  and not built.
+- **Session resume works but is silent.** The session id is persisted and state is re-read from the
+  harness on load, so a reload mid-incident recovers the run. There is no banner announcing it.
+- **The Command Room polls, it does not stream.** State is re-read every four seconds rather than
+  consuming the harness's SSE feed. Simpler and resume-safe; up to four seconds behind.
+- **One incident scenario.** Checkout rollback, done thoroughly. `restart_service` and
+  `scale_service` are implemented and gated but no seeded incident calls for them.
+- **Code Mode makes the timeline vary.** The model sometimes reaches MCP tools from inside its
+  sandbox script rather than as top-level calls. The run is identical; the timeline shows sandbox
+  steps instead of individual read steps.
+- **Local sandbox only.** No Daytona provider is configured, so the host must permit unprivileged
+  user namespaces — WSL2, a privileged codespace, or a VM you have root on.
+
+---
+
+## Status
+
+- [x] Landing page and Command Room
+- [x] Simulated cloud: schema, seed, nine MCP tools
+- [x] TrueForge agent: SOP, gated tools, sandbox
+- [x] Live agent loop wired into the UI, with the approval round trip
+- [x] Sandbox verified running agent-written Python under bubblewrap
+- [x] One-click Codespaces environment
+- [x] All review findings cleared
+- [ ] Sub-agent fan-out
+- [ ] Unit tests
+- [ ] Second incident scenario
