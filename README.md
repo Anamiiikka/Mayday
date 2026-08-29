@@ -200,9 +200,10 @@ already approved it.
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Anamiiikka/Mayday)
 
 A codespace builds the whole stack — sandbox dependencies, a database, the harness, and the
-Command Room — and starts it for you. Paste a [Google AI Studio](https://aistudio.google.com/apikey)
-key into the `GEMINI_API_KEY` secret when you create it; leave `NEON_DATABASE_URL` blank and a
-local Postgres is used instead. When the build finishes, open port 3000 from the Ports tab.
+Command Room — and starts it for you. Paste an [OpenRouter](https://openrouter.ai/keys)
+key into the `OPENROUTER_API_KEY` secret when you create it (a `GEMINI_API_KEY` secret is kept as a
+fallback); leave `NEON_DATABASE_URL` blank and a local Postgres is used instead. When the build
+finishes, open port 3000 from the Ports tab.
 
 This is not a convenience shortcut around a hard setup — it is the only environment we can promise
 in advance. TrueForge's sandbox builds a bubblewrap jail, which needs a user namespace, and the
@@ -214,8 +215,9 @@ Everything below is the same stack, assembled by hand.
 
 ### You will need
 
-Node 22+, a [Neon](https://neon.tech) database (free tier), a
-[Google AI Studio](https://aistudio.google.com/apikey) key (free tier), and a Linux host for the
+Node 22+, a [Neon](https://neon.tech) database (free tier), an
+[OpenRouter](https://openrouter.ai/keys) key (free tier; Gemini via
+[Google AI Studio](https://aistudio.google.com/apikey) as fallback), and a Linux host for the
 harness — on Windows that means WSL2, because TrueForge's sandbox is Linux-only.
 
 ### 1. The simulated cloud
@@ -252,7 +254,14 @@ share `localhost`; without it the harness cannot reach the backend.
 ### 3. Model, tools, agent
 
 ```bash
-# a model provider — free tiers differ wildly, see below
+# a model provider — OpenRouter is the default (Gemini stays as a fallback), see below
+curl -X PUT http://localhost:8790/api/v1/settings/model-providers \
+  -H 'Content-Type: application/json' \
+  -d '{"manifest":{"type":"custom","name":"openrouter","base_url":"https://openrouter.ai/api/v1",
+       "auth":{"api_key":"YOUR_KEY"},
+       "models":[{"name":"openrouter-minimax-m3","model_id":"minimax/minimax-m3:free","properties":{}}]}}'
+
+# fallback provider — only needed if you prefer Gemini
 curl -X PUT http://localhost:8790/api/v1/settings/model-providers \
   -H 'Content-Type: application/json' \
   -d '{"manifest":{"type":"google-gemini","auth":{"api_key":"YOUR_KEY"},
@@ -291,7 +300,8 @@ price**. Free tiers vary more than you would expect:
 
 | Provider | Verdict |
 |---|---|
-| **Google Gemini** `gemini-3.5-flash-lite` | **Recommended.** Reliable tool calling, enough headroom to finish a run. What `trueforge/agent.json` ships with. |
+| **OpenRouter** `openrouter-minimax-m3` | **Recommended / default.** What `trueforge/agent.json` ships with. Reliable tool calling; the `:free` route shares a per-provider pool, so when it is busy you can switch to a fallback. |
+| **Google Gemini** `gemini-3.5-flash-lite` | **Fallback.** Reliable tool calling and enough headroom to finish a run. Registered alongside OpenRouter unless you want it as the only provider; switch the model name in `trueforge/agent.json` to use it as primary. |
 | Groq | Caps at 8,000 tokens/min — about two calls. The harness's first request alone is larger than that, so the run dies immediately. |
 | NVIDIA NIM | `llama-3.3-70b` and `deepseek-v4-flash` work but take 30–40s per call. `gpt-oss-120b` hangs once tool-call history builds up. |
 
