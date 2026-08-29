@@ -58,9 +58,9 @@ export default function LandingPage() {
             size="lg"
             className="mt-7 bg-flare px-5 font-semibold text-white hover:opacity-90"
             nativeButton={false}
-            render={<a href="#command-room" />}
+            render={<a href="/command-room" />}
           >
-            Open Command Room
+            Open in command room
           </Button>
         </div>
       </section>
