@@ -21,8 +21,12 @@
   // Set these when you create the codespace. Without a model key the stack
   // still boots — you just cannot dispatch the agent until one is registered.
   "secrets": {
+    "OPENROUTER_API_KEY": {
+      "description": "OpenRouter key. Default model provider for tool calling (openrouter-minimax-m3).",
+      "documentationUrl": "https://openrouter.ai/keys"
+    },
     "GEMINI_API_KEY": {
-      "description": "Google AI Studio key. The free tier is enough for the demo.",
+      "description": "Google AI Studio key. Fallback provider if no OpenRouter key is set.",
       "documentationUrl": "https://aistudio.google.com/apikey"
     },
     "NEON_DATABASE_URL": {

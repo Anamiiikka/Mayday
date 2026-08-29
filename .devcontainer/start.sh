@@ -69,15 +69,27 @@ register() {
 }
 
 echo "==> Registering harness configuration"
+# OpenRouter is the default provider (matches the model in trueforge/agent.json).
+# Gemini stays registered as a fallback for when the OpenRouter free pool is busy.
+if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+  register model-provider PUT /settings/model-providers --data @- <<JSON
+{"manifest":{"type":"custom","name":"openrouter","base_url":"https://openrouter.ai/api/v1",
+ "auth":{"api_key":"$OPENROUTER_API_KEY"},
+ "models":[{"name":"openrouter-minimax-m3","model_id":"minimax/minimax-m3:free","properties":{}}]}}
+JSON
+else
+  echo "    no OPENROUTER_API_KEY secret — falling back to GEMINI_API_KEY"
+fi
 if [[ -n "${GEMINI_API_KEY:-}" ]]; then
   register model-provider PUT /settings/model-providers --data @- <<JSON
 {"manifest":{"type":"google-gemini","auth":{"api_key":"$GEMINI_API_KEY"},
  "models":[{"model_id":"gemini-3.5-flash-lite","name":"gemini-3-5-flash-lite",
  "properties":{"context_length":1048576,"max_output_tokens":65536}}]}}
 JSON
-else
-  echo "    no GEMINI_API_KEY secret — add one and re-run this script to"
-  echo "    register a model, or the agent has nothing to think with"
+fi
+if [[ -z "${OPENROUTER_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" ]]; then
+  echo "    no provider key set — add OPENROUTER_API_KEY (or GEMINI_API_KEY) and"
+  echo "    re-run this script, or the agent has nothing to think with"
 fi
 
 # The backend rejects /mcp without this bearer token, so the harness is the only
