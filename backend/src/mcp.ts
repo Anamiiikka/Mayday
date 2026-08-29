@@ -20,8 +20,30 @@ const optionalEnum = <T extends readonly [string, ...string[]]>(values: T) =>
   );
 
 function json(data: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+  // structuredContent mirrors the data so the harness's tool catalog can carry
+  // a declared outputSchema — which the agent would otherwise have to discover
+  // with list_tools/get_tool_info calls that burn its per-minute quota.
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+    structuredContent: data as { [x: string]: unknown },
+  };
 }
+
+/**
+ * Like `json`, but the structured content is an object with the returned rows
+ * under `rows`. The MCP SDK only advertises a tool's outputSchema when it is an
+ * object schema, so array-shaped outputs get this object wrapper on the
+ * structured side while the human-readable text stays the raw array.
+ */
+function jsonRows(rows: unknown) {
+  return {
+    ...json(rows),
+    structuredContent: { rows: rows as { [x: string]: unknown }[] },
+  };
+}
+
+/** Permissive shape for rows returned by the read tools. */
+const loose = z.record(z.string(), z.unknown());
 
 function toolError(message: string) {
   return {
@@ -116,6 +138,7 @@ export function buildMcpServer(): McpServer {
       description:
         "Current status of every service with its latest telemetry sample. error_rate_pct is already a percentage: 8.1 means 8.1% of requests failed, 0.4 means 0.4%.",
       annotations: { readOnlyHint: true },
+      outputSchema: z.object({ rows: z.array(loose) }),
     },
     async () => {
       const result = await pool.query(`
@@ -128,7 +151,7 @@ export function buildMcpServer(): McpServer {
         ) m ON true
         ORDER BY s.id
       `);
-      return json(result.rows);
+      return jsonRows(result.rows);
     },
   );
 
@@ -146,6 +169,12 @@ export function buildMcpServer(): McpServer {
           .describe("Return per-minute rows instead of 5-minute buckets. Verbose — prefer buckets."),
       },
       annotations: { readOnlyHint: true },
+      outputSchema: z.object({
+        service: z.string(),
+        window_minutes: z.number(),
+        bucket: z.string(),
+        samples: z.array(loose),
+      }),
     },
     async ({ service, window_minutes, raw }) => {
       if (raw) {
@@ -156,7 +185,7 @@ export function buildMcpServer(): McpServer {
            ORDER BY ts`,
           [service, window_minutes],
         );
-        return json(result.rows);
+        return json({ service, window_minutes, bucket: "1m raw", samples: result.rows });
       }
       const result = await pool.query(
         `SELECT to_char(date_bin('5 minutes', ts, now()), 'MM-DD HH24:MI') AS bucket,
@@ -186,6 +215,7 @@ export function buildMcpServer(): McpServer {
         limit: z.number().int().min(1).max(50).default(10).describe("Max distinct message groups"),
       },
       annotations: { readOnlyHint: true },
+      outputSchema: z.object({ service: z.string(), groups: z.array(loose) }),
     },
     async ({ service, level, query, limit }) => {
       const result = await pool.query(
@@ -211,6 +241,7 @@ export function buildMcpServer(): McpServer {
         "Deploy history, newest first. Correlate deploy times with when metrics degraded.",
       inputSchema: { service: z.string().optional() },
       annotations: { readOnlyHint: true },
+      outputSchema: z.object({ rows: z.array(loose) }),
     },
     async ({ service }) => {
       const result = await pool.query(
@@ -220,7 +251,7 @@ export function buildMcpServer(): McpServer {
          ORDER BY deployed_at DESC LIMIT 20`,
         [service ?? null],
       );
-      return json(result.rows);
+      return jsonRows(result.rows);
     },
   );
 
@@ -233,6 +264,7 @@ export function buildMcpServer(): McpServer {
         incident_id: z.string().optional().describe("Alias for id."),
       },
       annotations: { readOnlyHint: true },
+      outputSchema: z.object({ incident: loose.nullable(), actions: z.array(loose) }),
     },
     async (args) => {
       const id = args.id ?? args.incident_id;
